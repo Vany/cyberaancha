@@ -702,15 +702,15 @@ function fillQueue(node, queue) {
 // this page; it is embedded into a draggable bookmarklet and a copyable console
 // snippet, each = config {server, token, pace_ms} + the /collector.js source.
 function buildCollectorCard() {
-  const token = h("input", { type: "password", name: "collector-token", placeholder: "aancha-collector-…", autocomplete: "off" });
   const bm = h("a", { class: "bm", href: "#" }, "⛏ aancha collect");
-  const snippet = h("pre", { class: "snippet" }, "введите токен, чтобы получить сниппет");
+  const snippet = h("pre", { class: "snippet" }, "…");
   const copy = h("button", { class: "ghost" }, "Копировать сниппет");
   const note = h("span", { class: "muted", style: "font-size:.82rem" });
+  let currentToken = "";
 
   async function build() {
-    const t = token.value.trim();
-    if (!t) { snippet.textContent = "введите токен, чтобы получить сниппет"; bm.removeAttribute("href"); return; }
+    const t = currentToken;
+    if (!t) { snippet.textContent = "не удалось получить токен"; bm.removeAttribute("href"); return; }
     const cfgJson = JSON.stringify({ server: location.origin, token: t, pace_ms: 1500 });
     let src;
     try { src = await api("/collector.js"); }
@@ -724,27 +724,35 @@ function buildCollectorCard() {
       `(0,eval)(p?p.createScript(code):code)})})()`;
     bm.href = "javascript:" + encodeURIComponent(code);
   }
-  token.addEventListener("input", build);
+  // The panel is already admin-authed, so it fetches the collector token itself —
+  // no copy-paste. The token is a real random value (not derived from anything
+  // public), just not hidden from these trusted users.
+  const tokenLine = h("code", { style: "font-size:.78rem; word-break:break-all" }, "…");
+  (async () => {
+    try {
+      const { token } = await api("/api/collector/token");
+      currentToken = token;
+      tokenLine.textContent = token;
+      await build();
+    } catch (e) { note.textContent = "не удалось получить токен: " + e.message; }
+  })();
   copy.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(snippet.textContent));
 
   return h("div", { class: "card" },
     h("h3", null, "Коллектор — сбор данных с YouTube",
       help("Маленькая программа-кнопка, которая читает ваши видео на YouTube прямо в вашем браузере и присылает их сюда. Ничего устанавливать не нужно.")),
     howto("Как собрать данные — по шагам",
-      h("p", null, "«Коллектор» работает так: вы получаете кнопку-закладку, кладёте её в браузер и нажимаете на YouTube. Закладка — это сохранённая кнопка в браузере (обычно в строке под адресом сайта)."),
+      h("p", null, "«Коллектор» работает так: вы кладёте кнопку-закладку в браузер и нажимаете её на YouTube. Закладка — это сохранённая кнопка в браузере (обычно в строке под адресом сайта). Всё уже настроено — ключ подставляется сам."),
       h("ol", null,
-        h("li", null, "Вставьте токен в поле ниже. Токен — длинная строка-пароль, её выдаёт администратор."),
-        h("li", null, "Ниже появится зелёная кнопка «⛏ aancha collect». Перетащите её мышкой на панель закладок браузера (полоска со ссылками под адресной строкой)."),
+        h("li", null, "Перетащите зелёную кнопку «⛏ aancha collect» мышкой на панель закладок браузера (полоска со ссылками под адресной строкой)."),
         h("li", null, "Откройте ", h("b", null, "youtube.com"), " и войдите в свой аккаунт."),
         h("li", null, "Нажмите на эту закладку. Внизу справа появится тёмное окошко."),
         h("li", null, "Подождите. Когда в окошке появится ", h("span", { class: "ok-note" }, "«готово»"), " — всё собралось, окошко можно закрыть.")),
-      h("p", { class: "muted" }, "Если перетащить кнопку не вышло — есть запасной способ ниже («сниппет»). Он сложнее, лучше попросить администратора.")),
-    h("p", { class: "muted", style: "font-size:.85rem" },
-      "Токен коллектора", help("Строка-пароль из команды gen-token collector. Она остаётся только на этой странице и никуда не сохраняется."),
-      ": вставьте сюда."),
-    token,
+      h("p", { class: "muted" }, "Если перетащить кнопку не вышло — есть запасной способ ниже («сниппет»).")),
     h("p", { style: "margin:.7rem 0 .3rem" }, bm,
       h("span", { class: "muted", style: "font-size:.82rem" }, " ← перетащите эту кнопку в закладки браузера, потом нажмите её на youtube.com."), " ", note),
+    h("p", { class: "muted", style: "font-size:.78rem" },
+      "Ключ коллектора", help("Подставляется автоматически. Обычный ключ доступа, не секрет — прятать не нужно."), ": ", tokenLine),
     howto("Запасной способ, если закладка не сработала",
       h("p", null, "Это для тех, кто не боится «консоли разработчика». Скопируйте текст ниже, откройте youtube.com, нажмите F12, вкладка Console, вставьте и Enter. Если непонятно — попросите администратора."),
       snippet, h("div", { style: "margin-top:.5rem" }, copy)));

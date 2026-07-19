@@ -40,6 +40,7 @@ pub fn router(state: AppState) -> axum::Router {
         .route("/api/state", get(api::state))
         .route("/api/backups", get(api::backups_list).post(api::backup_now))
         .route("/api/harvest/enqueue", post(api::harvest_enqueue))
+        .route("/api/collector/token", get(api::collector_token))
         .route("/api/process/enqueue", post(api::process_enqueue))
         .route("/api/test-query", post(api::test_query))
         .route("/api/articles", get(api::articles_search))

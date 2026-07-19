@@ -1,7 +1,7 @@
 //! Panel + worker API handlers — thin: authorize, delegate, serialize.
 
 use super::AppState;
-use crate::auth::Role;
+use crate::auth::{self, Role};
 use crate::{answer, backup, db, kb, queue};
 use axum::Extension;
 use axum::extract::{Path, Query, State};
@@ -81,6 +81,32 @@ pub struct ClaimParams {
 }
 fn default_limit() -> usize {
     5
+}
+
+/// Admin: fetch (minting once, then reusing) the collector token so the panel
+/// can auto-fill the launcher — no copy-paste. The token is a real random value
+/// (public write-endpoint stays protected), but deliberately NOT hidden: the
+/// panel's users are trusted, and it's stored retrievable rather than only-hashed
+/// so it can be shown. Not derived from public info (the repo is public).
+pub async fn collector_token(State(st): State<AppState>, Extension(role): Extension<Role>) -> Response {
+    if role != Role::Admin {
+        return (StatusCode::FORBIDDEN, "admin only").into_response();
+    }
+    let result = st
+        .db
+        .call(|c| {
+            if let Some(t) = db::meta_get(c, "collector_token")? {
+                return Ok(t);
+            }
+            let t = auth::gen_token(c, "collector")?; // stores the verifier hash too
+            db::meta_set(c, "collector_token", &t)?;
+            Ok(t)
+        })
+        .await;
+    match result {
+        Ok(token) => axum::Json(json!({ "token": token })).into_response(),
+        Err(e) => internal(e),
+    }
 }
 
 /// Collector: claim a batch of tasks (lease-based).
