@@ -49,40 +49,62 @@ process_one() {
     return 1
   }
 
-  # yt-dlp → 16 kHz mono WAV (what whisper.cpp wants), piped, no intermediate file.
+  # --- Captions-first: yt-dlp auto-captions (fast, free, accurate). YouTube walls
+  # browser caption fetching behind poToken, but yt-dlp handles it. Whisper only
+  # when no captions exist. ---
+  yt-dlp -q --no-warnings --skip-download --write-auto-subs --write-subs \
+    --sub-langs "${WHISPER_LANG},en" --sub-format json3 \
+    -o "$work/${yt_id}.%(ext)s" "$url" 2>"$work/sub.err" || true
+  local sub; sub="$(ls "$work/${yt_id}."*".json3" 2>/dev/null | sort | head -1)"
+  if [ -n "$sub" ] && [ -s "$sub" ]; then
+    local sublang; sublang="$(basename "$sub" | sed -E "s/^${yt_id}\.([^.]+)\.json3$/\1/")"
+    jq -c --arg yt "$yt_id" --arg lang "$sublang" \
+      '{ yt_id:$yt, lang:$lang, source:"asr",
+         segments: [ .events[]? | select(.segs)
+           | { t_ms: .tStartMs, d_ms: .dDurationMs,
+               text: ([.segs[].utf8] | join("") | gsub("^\\s+|\\s+$";"")) }
+           | select(.text != "") ] }' \
+      "$sub" >"$result_json" || { fail "parse subs json3"; return 0; }
+    if [ "$(jq '.segments | length' "$result_json")" -gt 0 ]; then
+      submit_result "$result_json" "captions (${sublang})"
+      return $?
+    fi
+  fi
+
+  # No captions → download audio and transcribe locally with Whisper.
+  echo "  no captions; transcribing audio with whisper…"
   if ! yt-dlp -q --no-warnings -f bestaudio -o - "$url" 2>"$work/dl.err" \
        | ffmpeg -hide_banner -loglevel error -i pipe:0 -ar 16000 -ac 1 -c:a pcm_s16le "$wav" 2>"$work/ff.err"; then
     fail "audio fetch/convert: $(tail -c 300 "$work/dl.err" "$work/ff.err" 2>/dev/null | tr '\n' ' ')"
     return 0
   fi
-
-  # whisper.cpp → JSON with millisecond offsets.
   if ! "$WHISPER_BIN" -m "$WHISPER_MODEL" -f "$wav" -l "$WHISPER_LANG" \
        -oj -of "$out_json" -nt >"$work/w.log" 2>&1; then
     fail "whisper: $(tail -c 300 "$work/w.log" | tr '\n' ' ')"
     return 0
   fi
-
-  # Shape into the transcribe schema; drop empty segments.
-  jq -c \
-    --arg yt "$yt_id" --arg lang "$WHISPER_LANG" --arg model "$MODEL_NAME" \
-    '{ yt_id:$yt, lang:$lang, model:$model,
+  jq -c --arg yt "$yt_id" --arg lang "$WHISPER_LANG" --arg model "$MODEL_NAME" \
+    '{ yt_id:$yt, lang:$lang, source:"whisper", model:$model,
        segments: [ .transcription[]
-         | { t_ms: .offsets.from,
-             d_ms: (.offsets.to - .offsets.from),
+         | { t_ms: .offsets.from, d_ms: (.offsets.to - .offsets.from),
              text: (.text | gsub("^\\s+|\\s+$";"")) }
          | select(.text != "") ] }' \
     "${out_json}.json" >"$result_json" || { fail "parse whisper json"; return 0; }
+  submit_result "$result_json" "whisper"
+}
 
-  local n; n="$(jq '.segments | length' "$result_json")"
+# Submit a result JSON to the server; log with a source label. Returns 0.
+submit_result() {
+  local file="$1" label="$2" n
+  n="$(jq '.segments | length' "$file")"
   if ! curl -fsS -H "$AUTH" -H 'content-type: application/json' \
-       --data-binary @"$result_json" \
+       --data-binary @"$file" \
        "$AANCHA_SERVER/api/transcribe/${id}/result" >/dev/null; then
-    fail "submit result"
-    return 0
+    fail "submit result"; return 0
   fi
-  echo "  done: ${n} segments"
-  rm -f "$wav" "${out_json}.json" "$result_json"
+  echo "  done via ${label}: ${n} segments"
+  rm -f "$work/${yt_id}."* 2>/dev/null
+  return 0
 }
 
 count=0

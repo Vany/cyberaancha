@@ -23,9 +23,8 @@ pub fn enqueue_integrate(conn: &Connection) -> Result<Value> {
     let now = Timestamp::now().to_string();
     let mut stmt = conn.prepare(
         "SELECT yt_id FROM videos
-         WHERE integrated = 0 AND meta_done = 1
-           AND captions_state != 'pending' AND comments_state != 'pending'
-           AND chat_state != 'pending'
+         WHERE integrated = 0 AND meta_done = 1 AND transcribe_state = 'done'
+           AND comments_state != 'pending' AND chat_state != 'pending'
            AND yt_id NOT IN (SELECT subject FROM tasks WHERE type = 'integrate' AND state IN ('pending','claimed'))",
     )?;
     let ready: Vec<String> = stmt
@@ -292,14 +291,15 @@ pub fn submit_transcribe(conn: &Connection, task_id: i64, result: &Value) -> Res
     }
     let compact = serde_json::to_vec(&result["segments"])?;
     let packed = raw::compress(&compact)?;
+    let source = result["source"].as_str().unwrap_or("whisper"); // asr (yt-dlp subs) | whisper
     conn.execute(
         "INSERT INTO transcripts (video_id, source, lang, segments_zstd, updated_at)
-         VALUES (?1, 'whisper', ?2, ?3, ?4)
-         ON CONFLICT(video_id) DO UPDATE SET source = 'whisper', lang = excluded.lang,
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(video_id) DO UPDATE SET source = excluded.source, lang = excluded.lang,
              segments_zstd = excluded.segments_zstd, updated_at = excluded.updated_at",
-        params![subject, result["lang"].as_str(), packed, Timestamp::now().to_string()],
+        params![subject, source, result["lang"].as_str(), packed, Timestamp::now().to_string()],
     )?;
-    // Transcript now exists → clear the way to re-integrate this video.
+    // Transcript now exists → clear the way to (re-)integrate this video.
     conn.execute(
         "UPDATE videos SET transcribe_state = 'done', captions_state = 'have', integrated = 0 WHERE yt_id = ?1",
         [&subject],
@@ -350,8 +350,6 @@ mod tests {
                     "harvest_meta" => json!({ "yt_id": t.subject, "title": "Про сон",
                         "published_at": "2026-07-01T00:00:00Z", "duration_s": 3600,
                         "channel_id": "UC12345678901234567890AB", "raw_player": "{}" }),
-                    "harvest_captions" => json!({ "yt_id": t.subject, "lang": "ru", "source": "asr",
-                        "segments": [{ "t_ms": 60000, "d_ms": 4000, "text": "мелатонин помогает засыпать" }] }),
                     "harvest_comments" => json!({ "yt_id": t.subject, "comments": [
                         { "id": "cx", "text": "а доза?", "author_channel_id": "UCaaaaaaaaaaaaaaaaaaaaaa", "author_name": "fan" },
                         { "id": "ax", "text": "три миллиграмма", "parent_id": "cx",
@@ -363,6 +361,11 @@ mod tests {
                 };
                 queue::submit(c, &cfg, t.id, &r)?;
             }
+            // The Mac transcriber supplies the transcript (yt-dlp captions here).
+            let tj = claim_transcribe(c)?.expect("a transcribe task");
+            submit_transcribe(c, tj["id"].as_i64().unwrap(), &json!({
+                "yt_id": "vid00000001", "lang": "ru", "source": "asr",
+                "segments": [{ "t_ms": 60000, "d_ms": 4000, "text": "мелатонин помогает засыпать" }] }))?;
 
             // Enqueue + claim integrate; the bundle must carry transcript + prof reply.
             let enq = enqueue_integrate(c)?;
@@ -414,7 +417,7 @@ mod tests {
         let db = Db::open(dir.path())?;
         let cfg = cfg();
         db.with(|c| {
-            // A video with no captions, harvested.
+            // Harvest a video; discover schedules meta + comments + transcribe.
             queue::enqueue_wave(c, &cfg, "back")?;
             let d = queue::claim(c, &cfg, "collector", 5)?;
             let at = Timestamp::now().checked_sub(24.hours()).unwrap().to_string();
@@ -424,30 +427,32 @@ mod tests {
                 let r = match t.r#type.as_str() {
                     "harvest_meta" => json!({ "yt_id": t.subject, "title": "t",
                         "published_at": "2026-07-01T00:00:00Z", "raw_player": "{}" }),
-                    "harvest_captions" => json!({ "yt_id": t.subject, "none": true }),
                     "harvest_comments" => json!({ "yt_id": t.subject, "comments": [] }),
                     other => panic!("unexpected {other}"),
                 };
                 queue::submit(c, &cfg, t.id, &r)?;
             }
-            enqueue_integrate(c)?;
+            // First transcript (yt-dlp subs) — but the integrate pass finds it garbage.
+            let tj = claim_transcribe(c)?.expect("a transcribe task");
+            submit_transcribe(c, tj["id"].as_i64().unwrap(), &json!({ "yt_id": "nocapvideo1",
+                "lang": "ru", "source": "asr", "segments": [{ "t_ms": 0, "text": "мусор" }] }))?;
+            assert_eq!(enqueue_integrate(c)?["integrate_enqueued"], 1);
             let task = claim_integrate(c)?.expect("integrate task");
 
-            // Claude says captions are unusable → spawns a transcribe task.
+            // Claude judges the transcript unusable → re-opens a transcribe task.
             let out = submit_integrate(c, task.id, &json!({ "needs_transcription": true, "articles": [] }))?;
             assert!(!out.reindex);
-            let tj = claim_transcribe(c)?.expect("a transcribe task");
-            assert_eq!(tj["yt_id"], "nocapvideo1");
+            let tj2 = claim_transcribe(c)?.expect("a re-transcribe task");
+            assert_eq!(tj2["yt_id"], "nocapvideo1");
 
-            // Whisper returns segments; video reopens for integration.
-            submit_transcribe(c, tj["id"].as_i64().unwrap(), &json!({ "yt_id": "nocapvideo1",
-                "lang": "ru", "model": "large-v3-turbo",
+            // Whisper returns better segments; video reopens for integration.
+            submit_transcribe(c, tj2["id"].as_i64().unwrap(), &json!({ "yt_id": "nocapvideo1",
+                "lang": "ru", "source": "whisper", "model": "large-v3-turbo",
                 "segments": [{ "t_ms": 0, "text": "восстановленный текст" }] }))?;
-            let (cap, integ): (String, i64) = c.query_row(
-                "SELECT captions_state, integrated FROM videos WHERE yt_id='nocapvideo1'", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            assert_eq!((cap.as_str(), integ), ("have", 0)); // ready to integrate again
-            let re = enqueue_integrate(c)?;
-            assert_eq!(re["integrate_enqueued"], 1);
+            let (ts, integ): (String, i64) = c.query_row(
+                "SELECT transcribe_state, integrated FROM videos WHERE yt_id='nocapvideo1'", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            assert_eq!((ts.as_str(), integ), ("done", 0)); // ready to integrate again
+            assert_eq!(enqueue_integrate(c)?["integrate_enqueued"], 1);
             Ok(())
         })
     }

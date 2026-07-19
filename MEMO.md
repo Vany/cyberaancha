@@ -2,6 +2,14 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — captions move to the Mac (yt-dlp); collector parallelism
+
+- **Root cause of "captions: none":** YouTube walls browser caption fetching behind poToken (2024+). Verified in-browser: `/youtubei/v1/player` returns UNPLAYABLE + no tracks even with the session; the watch-page `ytInitialPlayerResponse` HAS `["ru(auto)"]` but its timedtext baseUrl returns HTTP 200 **empty** without poToken; `get_transcript` 400s. **yt-dlp gets the auto-captions cleanly** (handles poToken/signatures).
+- **Architecture change:** captions leave the browser. Collector now does discover/meta/comments/chat only. discover schedules a **`transcribe`** task (Mac). `scripts/transcribe_pending.sh` = yt-dlp auto-subs (json3, ru→en) first → parse to schema (source=asr); Whisper only when no subs (source=whisper). integrate readiness now requires `transcribe_state='done'`. Harvest wave completes on collector work (maybe_finish_wave counts only collector types); transcribe/integrate run after. `harvest_captions` removed from collector_types (schema/apply left dead-but-harmless).
+- **Collector parallelism** (V asked): main loop is now a pool of N=4 concurrent workers (AANCHA_CFG.concurrency, cap 8); each still paces its own requests so net rate ≈ N/pace.
+- Collector/panel now brand-aware (console/box/button use AANCHA_CFG.brand). 12 tests updated for the new flow, all green.
+- Live-verified against @vanyserezhkin: harvest works (1316 discovered, meta+comments+chat OK); yt-dlp pulled 5464 real RU caption segments for a sample video.
+
 ## 2026-07-19 — finished all-but-TG; whisper ready; auth lockout
 
 - **Whisper**: installed whisper-cpp (brew, whisper-cli) + model ~/models/ggml-large-v3-turbo-q5_0.bin (547M, q5_0 quant of turbo). Verified whisper-cli `-oj` JSON = `transcription[].offsets.{from,to}` (ms) + `.text`, which the transcribe script's jq maps to the schema `{t_ms, d_ms, text}` — confirmed valid. Transcribe pipeline (yt-dlp→ffmpeg 16k mono→whisper→submit) ready for real videos.

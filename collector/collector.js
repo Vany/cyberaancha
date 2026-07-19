@@ -218,54 +218,6 @@
     };
   };
 
-  // Fetch the player response, returning caption tracks. Public (omit) first;
-  // if that yields none and we have a session, retry with it — captions are
-  // sometimes withheld from anonymous player calls. Logs what each path sees.
-  const playerWithCaptions = async (videoId) => {
-    for (const creds of (/SAPISID=/.test(document.cookie) ? ["omit", "same-origin"] : ["omit"])) {
-      const p = await innertube("player", { videoId }, creds);
-      const status = p?.playabilityStatus?.status;
-      const tracks = p?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-      dbg(`captions ${videoId} [${creds}]: playability=${status}, captions=${p?.captions ? "obj" : "absent"}, tracks=${tracks.length}`,
-        tracks.map((t) => `${t.languageCode}${t.kind === "asr" ? "(auto)" : ""}`));
-      if (tracks.length) return { p, tracks, creds };
-      if (creds === "omit") dbg(`captions ${videoId}: no tracks anonymously; player top keys:`, Object.keys(p || {}));
-    }
-    return { p: null, tracks: [], creds: null };
-  };
-
-  const harvestCaptions = async (input) => {
-    say(`captions: ${input.yt_id}`);
-    const { tracks } = await playerWithCaptions(input.yt_id);
-    if (!tracks.length) { dbg(`captions ${input.yt_id}: NONE`); return { yt_id: input.yt_id, none: true }; }
-    // Prefer Russian, then any; manual over ASR within the same language.
-    const score = (t) => (t.languageCode?.startsWith("ru") ? 2 : 0) + (t.kind === "asr" ? 0 : 1);
-    const track = tracks.sort((a, b) => score(b) - score(a))[0];
-    await pace();
-    const url = new URL(track.baseUrl, location.origin);
-    url.searchParams.set("fmt", "json3");
-    const res = await fetch(url, { credentials: "omit" });
-    dbg(`captions ${input.yt_id}: timedtext ${res.status} for ${track.languageCode}${track.kind === "asr" ? "(auto)" : ""}`);
-    if (!res.ok) throw new Error(`timedtext -> ${res.status}`);
-    const j3 = await res.json();
-    const segments = (j3.events || [])
-      .filter((e) => e.segs && e.segs.some((s) => s.utf8 && s.utf8.trim()))
-      .map((e) => ({
-        t_ms: e.tStartMs | 0,
-        d_ms: e.dDurationMs ?? null,
-        text: e.segs.map((s) => s.utf8).join("").replace(/\s+/g, " ").trim().slice(0, 2000),
-      }))
-      .filter((s) => s.text);
-    dbg(`captions ${input.yt_id}: ${segments.length} segments`);
-    if (!segments.length) return { yt_id: input.yt_id, none: true };
-    return {
-      yt_id: input.yt_id,
-      lang: track.languageCode || "und",
-      source: track.kind === "asr" ? "asr" : "manual",
-      segments,
-    };
-  };
-
   // --- comments & chat (written from documented structure; deep-scan based so
   // they tolerate wrapper drift. NOT yet verified live — first real run should
   // spot-check counts, like discover's lockupViewModel pass did). ---
@@ -389,36 +341,43 @@
   };
 
   const HANDLERS = {
-    discover, harvest_meta: harvestMeta, harvest_captions: harvestCaptions,
+    discover, harvest_meta: harvestMeta,
     harvest_comments: harvestComments, harvest_chat: harvestChat,
   };
 
-  // ---- main loop ------------------------------------------------------------
+  // ---- main loop: a small pool of concurrent workers -----------------------
+  // N tasks run at once (each still paces its own YouTube requests, so the net
+  // rate is N/pace — keep N modest to stay polite). Tune via AANCHA_CFG.concurrency.
+  const CONCURRENCY = Math.max(1, Math.min(cfg.concurrency || 4, 8));
   (async () => {
     let done = 0, failed = 0;
+    const runOne = async (t) => {
+      dbg(`task #${t.id} ${t.type} ${t.subject}`);
+      try {
+        const result = await HANDLERS[t.type](t.input);
+        const summary = await api(`/api/tasks/${t.id}/result`, { method: "POST", body: JSON.stringify(result) });
+        dbg(`task #${t.id} ${t.type} OK →`, summary);
+        done++;
+      } catch (e) {
+        dwarn(`task #${t.id} ${t.type} FAILED:`, e);
+        await api(`/api/tasks/${t.id}/fail`, {
+          method: "POST", body: JSON.stringify({ error: String(e).slice(0, 500) }),
+        }).catch(() => {});
+        failed++;
+      }
+      say(`done ${done}, failed ${failed} — working…`);
+    };
     try {
       for (;;) {
         if (window.AANCHA_STOP) break;
-        const { tasks } = await api("/api/tasks?limit=5");
+        // Claim a batch; lease covers all of them while the pool drains it.
+        const { tasks } = await api(`/api/tasks?limit=${CONCURRENCY * 3}`);
         if (!tasks.length) break;
-        for (const t of tasks) {
-          if (window.AANCHA_STOP) break;
-          dbg(`task #${t.id} ${t.type} ${t.subject}`);
-          try {
-            const result = await HANDLERS[t.type](t.input);
-            const summary = await api(`/api/tasks/${t.id}/result`, { method: "POST", body: JSON.stringify(result) });
-            dbg(`task #${t.id} ${t.type} OK →`, summary);
-            done++;
-          } catch (e) {
-            dwarn(`task #${t.id} ${t.type} FAILED:`, e);
-            await api(`/api/tasks/${t.id}/fail`, {
-              method: "POST",
-              body: JSON.stringify({ error: String(e).slice(0, 500) }),
-            }).catch(() => {});
-            failed++;
-          }
-          say(`done ${done}, failed ${failed} — working…`);
-        }
+        const queue = tasks.slice();
+        const worker = async () => {
+          while (queue.length && !window.AANCHA_STOP) await runOne(queue.shift());
+        };
+        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
       }
       say(`finished: ${done} done, ${failed} failed. Safe to close.`);
     } catch (e) {

@@ -50,7 +50,9 @@ pub(super) fn validator(task_type: &str) -> Result<&'static jsonschema::Validato
 }
 
 pub fn collector_types() -> &'static [&'static str] {
-    &["discover", "harvest_meta", "harvest_captions", "harvest_comments", "harvest_chat"]
+    // Captions dropped: the browser can't fetch them (poToken wall); the Mac's
+    // `transcribe` task gets them via yt-dlp, falling back to Whisper.
+    &["discover", "harvest_meta", "harvest_comments", "harvest_chat"]
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -277,7 +279,7 @@ fn apply_discover(conn: &Connection, cfg: &Config, result: &Value) -> Result<Val
     db::meta_set(conn, "wave_end", &end)?;
 
     let mut stmt = conn.prepare(
-        "SELECT yt_id, kind, meta_done, captions_state, comments_state, chat_state FROM videos
+        "SELECT yt_id, kind, meta_done, transcribe_state, comments_state, chat_state FROM videos
          WHERE approx_published >= ?1 AND approx_published < ?2
          ORDER BY approx_published DESC LIMIT ?3",
     )?;
@@ -288,12 +290,9 @@ fn apply_discover(conn: &Connection, cfg: &Config, result: &Value) -> Result<Val
         .collect::<std::result::Result<_, _>>()?;
 
     let mut created = 0;
-    for (yt_id, kind, meta_done, captions_state, comments_state, chat_state) in &picked {
+    for (yt_id, kind, meta_done, transcribe_state, comments_state, chat_state) in &picked {
         if *meta_done == 0 {
             created += enqueue_video_task(conn, "harvest_meta", yt_id, &now_s)?;
-        }
-        if captions_state == "pending" {
-            created += enqueue_video_task(conn, "harvest_captions", yt_id, &now_s)?;
         }
         if comments_state == "pending" {
             created += enqueue_video_task(conn, "harvest_comments", yt_id, &now_s)?;
@@ -301,6 +300,16 @@ fn apply_discover(conn: &Connection, cfg: &Config, result: &Value) -> Result<Val
         // Live chat replay exists only for streams.
         if kind == "stream" && chat_state == "pending" {
             created += enqueue_video_task(conn, "harvest_chat", yt_id, &now_s)?;
+        }
+        // Transcript comes from the Mac (yt-dlp subs → Whisper), not the browser:
+        // YouTube walls browser caption fetching behind poToken, but yt-dlp gets
+        // the auto-captions directly. So discover schedules a `transcribe` task.
+        if transcribe_state == "no" || transcribe_state == "pending" {
+            created += enqueue_video_task(conn, "transcribe", yt_id, &now_s)?;
+            conn.execute(
+                "UPDATE videos SET transcribe_state = 'pending' WHERE yt_id = ?1 AND transcribe_state = 'no'",
+                [yt_id],
+            )?;
         }
     }
     tracing::info!(discovered = videos.len(), window = %format!("{start}..{end}"), tasks = created, "discover applied");
@@ -495,7 +504,10 @@ fn store_raw(conn: &Connection, yt_id: &str, kind: &str, content: &[u8]) -> Resu
 /// and stamp last_gathered_at.
 fn maybe_finish_wave(conn: &Connection) -> Result<()> {
     let open: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE state IN ('pending', 'claimed')",
+        // "Gathered" = collector work done. transcribe/integrate run afterward
+        // as separate (Mac) steps and don't hold the harvest wave open.
+        "SELECT COUNT(*) FROM tasks WHERE state IN ('pending', 'claimed')
+           AND type IN ('discover', 'harvest_meta', 'harvest_comments', 'harvest_chat')",
         [],
         |r| r.get(0),
     )?;
@@ -582,22 +594,18 @@ mod tests {
 
             let ok = discover_result(&[("aaaaaaaaaaa", "video"), ("bbbbbbbbbbb", "stream")]);
             let summary = submit(c, &cfg, discover_id, &ok)?;
-            // video: meta+captions+comments (3); stream: +chat (4) => 7.
+            // video: meta+comments+transcribe (3); stream: +chat (4) => 7.
             assert_eq!(summary["tasks_created"], 7);
 
-            // Claim and finish them all; the stream's comments carry an author reply.
+            // Collector claims only its types (meta/comments/chat) — NOT transcribe.
             let batch = claim(c, &cfg, "collector", 20)?;
-            assert_eq!(batch.len(), 7);
+            assert_eq!(batch.len(), 5); // video: meta+comments; stream: meta+comments+chat
             for t in &batch {
                 let result = match t.r#type.as_str() {
                     "harvest_meta" => json!({
                         "yt_id": t.subject, "title": "T", "published_at": "2026-07-01T00:00:00Z",
                         "duration_s": 61, "channel_id": "UC12345678901234567890AB",
                         "view_count": 5, "raw_player": "{}"
-                    }),
-                    "harvest_captions" => json!({
-                        "yt_id": t.subject, "lang": "ru", "source": "asr",
-                        "segments": [ { "t_ms": 0, "d_ms": 1000, "text": "привет" } ]
                     }),
                     "harvest_comments" => json!({
                         "yt_id": t.subject, "comments": [
@@ -618,9 +626,17 @@ mod tests {
                 submit(c, &cfg, t.id, &result)?;
             }
 
-            // Wave closed: watermarks set, transcripts stored, videos updated.
+            // Harvest wave closes on collector completion; transcribe runs separately.
             assert!(db::meta_get(c, "wm_oldest")?.is_some());
             assert!(db::meta_get(c, "last_gathered_at")?.is_some());
+            // The Mac transcriber claims the 2 transcribe tasks and submits captions.
+            for _ in 0..2 {
+                let tj = claim_transcribe(c)?.expect("a transcribe task");
+                submit_transcribe(c, tj["id"].as_i64().unwrap(), &json!({
+                    "yt_id": tj["yt_id"], "lang": "ru", "source": "asr",
+                    "segments": [ { "t_ms": 0, "d_ms": 1000, "text": "привет" } ]
+                }))?;
+            }
             let n: i64 = c.query_row("SELECT COUNT(*) FROM transcripts", [], |r| r.get(0))?;
             assert_eq!(n, 2);
             // Author-reply detection: exactly the two "prof" comments flagged.
@@ -629,12 +645,12 @@ mod tests {
             assert_eq!(author, 2);
             let chat: i64 = c.query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get(0))?;
             assert_eq!(chat, 1); // only the stream got a chat task
-            let (meta_done, cap): (i64, String) = c.query_row(
-                "SELECT meta_done, captions_state FROM videos WHERE yt_id = 'aaaaaaaaaaa'",
+            let (meta_done, ts): (i64, String) = c.query_row(
+                "SELECT meta_done, transcribe_state FROM videos WHERE yt_id = 'aaaaaaaaaaa'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            assert_eq!((meta_done, cap.as_str()), (1, "have"));
+            assert_eq!((meta_done, ts.as_str()), (1, "done"));
 
             // Re-discover creates nothing new — everything is done.
             enqueue_wave(c, &cfg, "back")?;
