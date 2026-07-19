@@ -33,6 +33,7 @@ The base is **scientific reference material** — much of it is information for 
 - **C6 — Channel is config.** One channel per instance. Start: `@vanyserezhkin` (test, messier data — good stress test). Production: wipe (restore/drop) and point at `@AnchaBaranovaProf`. `channel_id` stored on rows anyway (cheap multi-channel option later).
 - **C7 — Modest host.** n1: 1 vCPU, 457 MB RAM, 8.6 GB disk (1.7 GB free). Container memory-capped, tantivy writer heap small (≤128 MB), reindex niced, raw blobs zstd-compressed. Disk headroom must be revisited before full Ancha backfill (§19).
 - **C8 — Security.** TLS via existing host nginx + Let's Encrypt; app binds 127.0.0.1:8087 only. Basic auth (roles owner/admin) for panel; separate bearer tokens for collector, preparer, MCP.
+- **C9 — Non-technical owner.** The professor (owner role) is not technically educated. Every operation she can perform must be self-explanatory in plain Russian, right where she does it — inline help and hover/tap tooltips, no jargon (or jargon immediately explained). Unusual multi-step operations (above all the **collector**) get a numbered, plain-language walkthrough with a plainly-labelled expected result. If a step can't be made obvious, it doesn't belong in the owner's surface.
 
 ## 4. System shape
 
@@ -142,6 +143,8 @@ No-build: vendored Preact + htm, ES modules, vanilla CSS; embedded into the bina
 
 Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeline/sources/facts; inline edit) · **Questions** (answer fields) · **Test** (query box → exact bot answer) · **Sources** (video inventory, per-stage status) · **System** (admin only: clocks, queue, collector launcher — bookmarklet drag-target + snippet copy + fresh token, MCP URL+token, backups, config view) · *(post-MVP)* **People**.
 
+**Owner help (C9).** Written for a non-technical professor: a reusable inline-help mechanism (a `?` info affordance with a plain-Russian tooltip, and expandable "как это работает" blocks). Every non-obvious control carries a tooltip; every unusual operation carries a numbered walkthrough ending in the visible result to expect. The **collector** gets the fullest treatment — what a bookmark/закладка is, drag it once, click it on youtube.com, wait for «готово» — because it is the scariest step. Owner-facing copy avoids "token/bearer/CSP/DevTools" unless immediately explained in lay terms.
+
 ## 11. Collector design
 
 - **Pure-fetch, zero DOM script injection** (P0-verified: YouTube CSP has no `connect-src`/`default-src` ⇒ page-context `fetch()` to our server is unrestricted; Trusted Types is enforced but only bites script-injection sinks, which we don't use). Console snippet therefore guaranteed; **bookmarklet vs snippet decided in testing** (Chrome CSP quirks).
@@ -242,4 +245,5 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - 2026-07-19 — Harvest is **time-windowed** (default 7 days per wave), not video-counted; two watermarks (oldest/newest). — *(V+C)*
 - 2026-07-19 — Secrets in DB (auth table), config secret-free; argon2 stable 0.5 (0.6 still RC). — *(C)*
 - 2026-07-19 — Code hosted at github.com/Vany/cyberaancha, private-first. — *(V+C)* **Superseded same day: repo is public** (V's call); history audited clean before the flip; secrets hygiene codified in PROG.md. — *(V)*
+- 2026-07-19 — **C9: non-technical owner.** All unusual operations (esp. the collector) must be explained inline / in tooltips, plain Russian, no unexplained jargon. New requirement → panel gets an owner-help pass. — *(V)*
 - 2026-07-19 — Hostnames: **test = youtube.serezhkin.com** (Vany's channel), prod = aancha.serezhkin.com (her channel). Both CNAME → n1.serezhkin.com. Per-host certbot (HTTP-01), not wildcard (wildcard needs DNS-01 + API plugin → no clean auto-renew). — *(V+C)*

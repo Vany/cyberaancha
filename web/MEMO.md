@@ -71,3 +71,17 @@ Finding #1 above is fixed: `kb::get_article` / `ArticleView` now returns full
 save was updated to re-send `art.stances/facts/links` verbatim — owner text-edits
 are now lossless (no reconstruction, facts/links preserved). Findings #2 (empty
 test-query → 400, guarded) and #3 (backups GET not role-gated, harmless) stand as-is.
+
+## 2026-07-19 — owner help pass (C9)
+
+Non-technical-owner requirement (SPEC C9): added a reusable help mechanism — a
+`?` badge with plain-Russian tooltip (hover + click/tap, Esc/outside-click to
+close) and expandable «howto» blocks. Applied across owner surfaces: Browse
+(how-to-search), article edit (per-field ? on Заголовок/Статус/Абзац/История/
+Синонимы), Questions (what-to-do), Test (why/how). The **collector** got the
+fullest treatment: a numbered step-by-step (what a закладка is → drag → open
+youtube → click → wait for «готово»), with the console-snippet path demoted to a
+clearly-marked "backup if the bookmark didn't work". Admin System actions carry
+short ? tooltips. Verified: no console errors, help/howto render correctly.
+Note: collector currently lives in the admin-only System tab; an owner-facing
+collector entry point is P7 (when she harvests owner-only data).

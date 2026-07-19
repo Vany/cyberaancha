@@ -19,6 +19,35 @@ runtime** — the panel talks only to this server's REST API.
 - Fail visibly: show API errors inline (status + body text), never swallow them.
 - Keep it small and observable; comments explain *why*, not *what*.
 
+## Audience & help (C9 — load-bearing)
+
+The **owner is Prof. Baranova, who is not technically educated.** Every operation
+she can perform must explain itself, in plain Russian, right where she does it.
+This is a first-class requirement, not polish.
+
+- **Reusable help mechanism**: a small `?` info affordance next to non-obvious
+  controls that reveals a plain-Russian tooltip on hover AND tap/click (works on
+  touch; dismiss on outside tap/Esc). Plus expandable **«Как это работает?»**
+  blocks for multi-step operations. Build one tiny helper and reuse it — do not
+  hand-place bespoke tooltips.
+- **No unexplained jargon** in owner-facing copy: avoid "token / bearer / CSP /
+  DevTools / API"; if a technical word is unavoidable, gloss it in lay terms in
+  the same breath ("закладка — кнопка в браузере").
+- **Every unusual operation gets a numbered walkthrough that ends in the visible
+  result to expect** ("…дождитесь зелёной надписи «готово»").
+- **The collector is the hardest and most important** to explain. Its launcher
+  must include a numbered, non-technical guide: what a закладка is, drag the green
+  button to the bookmarks bar once, open youtube.com, click it, watch the little
+  window until it says готово. Offer the console-snippet path only as a fallback,
+  clearly marked "если закладка не сработала", since it's scarier.
+- Where a control is admin-only and genuinely technical (tokens, backups), a brief
+  tooltip is enough — admin is Vany. The bar is highest on **owner-visible** surfaces
+  (Browse/Test/Questions and, when she harvests, the collector).
+- Tone: warm, short, concrete. Assume she's smart but new to the tooling.
+
+Tooltip/help copy is Russian (like all owner-facing UI). Keep it accurate to what
+the control actually does — wrong help is worse than none.
+
 ## Roles
 
 `GET /api/state` returns `role` = `"owner"` or `"admin"`. Show admin-only controls

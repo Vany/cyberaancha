@@ -100,6 +100,31 @@
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
   .actions-out { margin-top: .6rem; }
+  /* Owner help (C9): a "?" affordance with a plain-Russian tooltip (hover +
+     click/tap), and expandable "как это работает" blocks for multi-step tasks. */
+  .help { position: relative; display: inline-block; margin-left: .3rem; vertical-align: middle; }
+  .help > .q {
+    display: inline-flex; align-items: center; justify-content: center; width: 1.2rem; height: 1.2rem;
+    border-radius: 50%; background: var(--grey-bg); color: var(--muted); border: 1px solid var(--grey-line);
+    font-size: .74rem; font-weight: 700; cursor: help; user-select: none;
+  }
+  .help > .tip {
+    position: absolute; z-index: 60; left: 0; top: 1.6rem; width: min(22rem, 78vw);
+    background: #14161a; color: #eef2ff; padding: .6rem .75rem; border-radius: 8px;
+    font-size: .84rem; line-height: 1.5; font-weight: 400; white-space: normal;
+    box-shadow: 0 4px 16px rgba(0,0,0,.35); display: none;
+  }
+  .help:hover > .tip, .help:focus-within > .tip, .help.open > .tip { display: block; }
+  details.howto { margin: .6rem 0; border: 1px solid var(--line); border-radius: 9px; background: #fbfcff; }
+  details.howto > summary { cursor: pointer; padding: .55rem .85rem; font-weight: 600; color: var(--accent); font-size: .92rem; list-style: none; }
+  details.howto > summary::before { content: "▸ "; }
+  details.howto[open] > summary::before { content: "▾ "; }
+  details.howto[open] > summary { border-bottom: 1px solid var(--line); }
+  details.howto .body { padding: .7rem .95rem; font-size: .92rem; line-height: 1.55; }
+  details.howto .body p { margin: .3rem 0 .5rem; }
+  details.howto ol { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
+  details.howto li { margin: .35rem 0; }
+  .ok-note { color: var(--green-fg); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -133,6 +158,26 @@ function h(tag, attrs, ...kids) {
 }
 const $ = (id) => document.getElementById(id);
 const clear = (node) => node.replaceChildren();
+
+// ---- owner help (C9): non-technical, plain-Russian ---------------------------
+// A "?" badge with a tooltip that opens on hover AND click/tap (touch-friendly).
+function help(text) {
+  const q = h("span", { class: "q", tabindex: "0", role: "button", "aria-label": "Подсказка" }, "?");
+  const wrap = h("span", { class: "help" }, q, h("span", { class: "tip" }, text));
+  const toggle = (e) => { e.stopPropagation(); wrap.classList.toggle("open"); };
+  q.addEventListener("click", toggle);
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } });
+  return wrap;
+}
+// An expandable "как это работает" block for multi-step operations. body = DOM nodes.
+function howto(title, ...body) {
+  return h("details", { class: "howto" }, h("summary", null, title), h("div", { class: "body" }, ...body));
+}
+// A labelled field label with an attached help "?".
+function labelWith(text, tip) { return h("label", null, text, help(tip)); }
+// Dismiss any open tooltip on outside click / Esc.
+document.addEventListener("click", () => document.querySelectorAll(".help.open").forEach((n) => n.classList.remove("open")));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".help.open").forEach((n) => n.classList.remove("open")); });
 
 // ---- API wrapper ------------------------------------------------------------
 // Fails visibly: non-2xx throws Error(status + body) so callers can surface it
@@ -251,12 +296,17 @@ function route() {
 function renderBrowse(view, slug) {
   if (slug) return renderArticle(view, slug);
 
-  view.append(h("h2", null, "Обзор базы знаний"));
+  view.append(h("h2", null, "Обзор базы знаний",
+    help("Здесь собраны все темы, которые вы разбирали. Найдите тему поиском и откройте её, чтобы прочитать или поправить.")));
   const input = h("input", {
     type: "search", name: "q", placeholder: "Поиск: тема, синоним, вопрос…", value: lastBrowseQuery, autocomplete: "off",
   });
   const results = h("div");
-  view.append(h("div", { class: "card" }, input), results);
+  view.append(
+    howto("Как искать",
+      h("p", null, "Напишите слово или фразу так, как её сказал бы обычный человек — можно разговорно, можно с ошибкой. Система сама найдёт нужную тему."),
+      h("p", null, "Нажмите на найденную тему, чтобы открыть её. Внутри можно всё прочитать, а кнопкой «Редактировать» — поправить.")),
+    h("div", { class: "card" }, input), results);
 
   async function run() {
     const q = input.value.trim();
@@ -369,11 +419,18 @@ async function renderArticle(view, slug) {
     }));
 
     const form = h("div", { class: "card" },
-      h("label", null, "Заголовок"), fTitle,
-      h("label", null, "Статус"), fStatus,
-      h("label", null, "Абзац (ответ бота)"), fPara,
-      h("label", null, "Полная история (markdown)"), fStory,
-      h("label", null, "Синонимы (через запятую или с новой строки)"), fAliases,
+      howto("Что здесь можно менять",
+        h("p", null, "Это ваша статья о теме. Поправьте любой текст и нажмите «Сохранить» — изменения сразу попадут в базу. Наведите на «?» рядом с полем, чтобы узнать, зачем оно.")),
+      labelWith("Заголовок", "Название темы — как она называется в базе."),
+      fTitle,
+      labelWith("Статус", "«published» — бот отвечает по этой статье. «draft» (черновик) — пока не готово, бот её не использует."),
+      fStatus,
+      labelWith("Абзац (ответ бота)", "Короткий ответ в один абзац. Именно его бот отправляет людям — пишите так, как ответили бы сами."),
+      fPara,
+      labelWith("Полная история", "Полный рассказ о теме — для чтения и проверки. Бот его не отправляет. Можно оформлять: заголовки со знаком #, списки со знаком -."),
+      fStory,
+      labelWith("Синонимы", "Слова, по которым люди могут искать эту тему: разговорные, с ошибками, латинские названия лекарств и генов. По одному в строке — они помогают боту находить тему."),
+      fAliases,
       h("div", { style: "margin-top:.8rem" }, save, cancel), msg);
     controls.replaceWith(form);
   }
@@ -417,9 +474,13 @@ function renderStory(md) {
 
 // ---- Questions --------------------------------------------------------------
 async function renderQuestions(view) {
-  view.append(h("h2", null, "Открытые вопросы"));
+  view.append(h("h2", null, "Открытые вопросы",
+    help("Вопросы, на которые может ответить только вы. Часто это противоречия или пробелы, замеченные при разборе видео.")));
   const list = h("div");
-  view.append(list);
+  view.append(
+    howto("Что делать",
+      h("p", null, "Прочитайте вопрос, напишите ответ и нажмите «Отправить». Ваш ответ становится самым надёжным источником в базе — при следующем обновлении он попадёт в нужную статью.")),
+    list);
   list.append(h("div", { class: "empty" }, "Загрузка…"));
   let questions;
   try { ({ questions } = await api("/api/questions")); }
@@ -454,8 +515,11 @@ async function renderQuestions(view) {
 
 // ---- Test -------------------------------------------------------------------
 function renderTest(view) {
-  view.append(h("h2", null, "Тест ответа бота"),
-    h("p", { class: "muted" }, "Запрос как в Telegram → точный ответ движка (production, без LLM)."));
+  view.append(h("h2", null, "Тест ответа бота",
+    help("Проверьте, что ответит бот в Телеграме на тот или иной вопрос. Здесь работает ровно тот же поиск, что и у бота.")),
+    howto("Зачем это нужно",
+      h("p", null, "Напишите вопрос так, как задал бы человек. Вы увидите точный ответ, который отправит бот, и ссылки на ваши видео."),
+      h("p", null, "Если ответ не тот, что вы хотели — откройте статью в «Обзоре» и поправьте абзац или добавьте синонимы.")));
   const input = h("input", { type: "text", name: "test-q", placeholder: "Например: бессонница", autocomplete: "off" });
   const submit = h("button", null, "Спросить");
   const out = h("div");
@@ -541,11 +605,13 @@ function renderSystem(view) {
     }));
     return b;
   };
+  const actionRow = (label, tip, fn) => h("div", { style: "margin:.25rem 0" }, act(label, fn), help(tip));
   const actions = h("div", { class: "card" },
-    h("h3", null, "Действия"),
-    act("Собрать прошлую неделю", () => postJson("/api/harvest/enqueue?direction=back")),
-    act("Собрать новое", () => postJson("/api/harvest/enqueue?direction=forward")),
-    act("Обработать готовое", () => postJson("/api/process/enqueue")),
+    h("h3", null, "Действия",
+      help("Запуск сбора и обработки. Сначала «Собрать» ставит задачи в очередь — их выполняет коллектор в браузере; потом «Обработать готовое» отдаёт видео на разбор.")),
+    actionRow("Собрать прошлую неделю", "Ставит в очередь сбор ещё одной недели истории — назад от самого старого собранного видео.", () => postJson("/api/harvest/enqueue?direction=back")),
+    actionRow("Собрать новое", "Ставит в очередь сбор новых видео — вперёд от последнего собранного.", () => postJson("/api/harvest/enqueue?direction=forward")),
+    actionRow("Обработать готовое", "Отдаёт собранные видео на разбор (транскрипт → статьи). Разбор идёт на Маке в сессиях Claude.", () => postJson("/api/process/enqueue")),
     actOut);
 
   // --- backups ---
@@ -662,13 +728,26 @@ function buildCollectorCard() {
   copy.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(snippet.textContent));
 
   return h("div", { class: "card" },
-    h("h3", null, "Коллектор"),
+    h("h3", null, "Коллектор — сбор данных с YouTube",
+      help("Маленькая программа-кнопка, которая читает ваши видео на YouTube прямо в вашем браузере и присылает их сюда. Ничего устанавливать не нужно.")),
+    howto("Как собрать данные — по шагам",
+      h("p", null, "«Коллектор» работает так: вы получаете кнопку-закладку, кладёте её в браузер и нажимаете на YouTube. Закладка — это сохранённая кнопка в браузере (обычно в строке под адресом сайта)."),
+      h("ol", null,
+        h("li", null, "Вставьте токен в поле ниже. Токен — длинная строка-пароль, её выдаёт администратор."),
+        h("li", null, "Ниже появится зелёная кнопка «⛏ aancha collect». Перетащите её мышкой на панель закладок браузера (полоска со ссылками под адресной строкой)."),
+        h("li", null, "Откройте ", h("b", null, "youtube.com"), " и войдите в свой аккаунт."),
+        h("li", null, "Нажмите на эту закладку. Внизу справа появится тёмное окошко."),
+        h("li", null, "Подождите. Когда в окошке появится ", h("span", { class: "ok-note" }, "«готово»"), " — всё собралось, окошко можно закрыть.")),
+      h("p", { class: "muted" }, "Если перетащить кнопку не вышло — есть запасной способ ниже («сниппет»). Он сложнее, лучше попросить администратора.")),
     h("p", { class: "muted", style: "font-size:.85rem" },
-      "Токен из ", h("code", null, "gen-token collector"), ". Остаётся только в этой странице."),
+      "Токен коллектора", help("Строка-пароль из команды gen-token collector. Она остаётся только на этой странице и никуда не сохраняется."),
+      ": вставьте сюда."),
     token,
-    h("p", { style: "margin:.7rem 0 .3rem" }, bm, " ", note,
-      h("span", { class: "muted", style: "font-size:.82rem" }, " ← перетащите в закладки, затем нажмите на youtube.com. Если CSP блокирует — используйте сниппет:")),
-    snippet, h("div", { style: "margin-top:.5rem" }, copy));
+    h("p", { style: "margin:.7rem 0 .3rem" }, bm,
+      h("span", { class: "muted", style: "font-size:.82rem" }, " ← перетащите эту кнопку в закладки браузера, потом нажмите её на youtube.com."), " ", note),
+    howto("Запасной способ, если закладка не сработала",
+      h("p", null, "Это для тех, кто не боится «консоли разработчика». Скопируйте текст ниже, откройте youtube.com, нажмите F12, вкладка Console, вставьте и Enter. Если непонятно — попросите администратора."),
+      snippet, h("div", { style: "margin-top:.5rem" }, copy)));
 }
 
 // ---- boot -------------------------------------------------------------------
