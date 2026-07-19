@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "harvest_chat result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["yt_id", "messages"],
+  "properties": {
+    "yt_id": { "type": "string", "pattern": "^[0-9A-Za-z_-]{11}$" },
+    "unavailable": { "type": "boolean", "description": "no chat replay for this stream" },
+    "messages": {
+      "type": "array",
+      "maxItems": 500000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 200 },
+          "offset_ms": { "type": ["integer", "null"], "minimum": 0 },
+          "author_channel_id": { "type": ["string", "null"], "pattern": "^UC[0-9A-Za-z_-]{22}$" },
+          "author_name": { "type": "string", "maxLength": 200 },
+          "text": { "type": "string", "maxLength": 10000 }
+        }
+      }
+    }
+  }
+}

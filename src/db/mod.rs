@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_init", include_str!("migrations/001_init.sql")),
     ("002_queue", include_str!("migrations/002_queue.sql")),
+    ("003_comments_chat", include_str!("migrations/003_comments_chat.sql")),
 ];
 
 pub const DB_FILE: &str = "aancha.db";

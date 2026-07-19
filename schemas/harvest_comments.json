@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "harvest_comments result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["yt_id", "comments"],
+  "properties": {
+    "yt_id": { "type": "string", "pattern": "^[0-9A-Za-z_-]{11}$" },
+    "disabled": { "type": "boolean", "description": "comments turned off for this video" },
+    "comments": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 120 },
+          "parent_id": { "type": ["string", "null"], "maxLength": 120 },
+          "author_channel_id": { "type": ["string", "null"], "pattern": "^UC[0-9A-Za-z_-]{22}$" },
+          "author_name": { "type": "string", "maxLength": 200 },
+          "text": { "type": "string", "maxLength": 10000 },
+          "like_count": { "type": ["integer", "null"], "minimum": 0 },
+          "published_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      }
+    }
+  }
+}

@@ -245,7 +245,124 @@
     };
   };
 
-  const HANDLERS = { discover, harvest_meta: harvestMeta, harvest_captions: harvestCaptions };
+  // --- comments & chat (written from documented structure; deep-scan based so
+  // they tolerate wrapper drift. NOT yet verified live — first real run should
+  // spot-check counts, like discover's lockupViewModel pass did). ---
+  const ucOrNull = (s) => (/^UC[0-9A-Za-z_-]{22}$/.test(s || "") ? s : null);
+  const parseCount = (s) => {
+    if (!s) return null;
+    const m = String(s).replace(/\s/g, "").match(/([\d.]+)\s*([KMkmКМ])?/);
+    if (!m) return null;
+    const scale = /[KkК]/.test(m[2] || "") ? 1e3 : /[MmМ]/.test(m[2] || "") ? 1e6 : 1;
+    const n = Math.round(parseFloat(m[1]) * scale);
+    return Number.isFinite(n) ? n : null;
+  };
+  // The "load more" token that belongs to the section itself (not a reply expander).
+  const sectionNextToken = (page) => {
+    for (const cir of deepFind(page, "continuationItemRenderer")) {
+      const t = cir?.continuationEndpoint?.continuationCommand?.token ||
+                cir?.button?.buttonRenderer?.command?.continuationCommand?.token;
+      if (t) return t;
+    }
+    return null;
+  };
+  const collectComments = (page, parentId, seen, out) => {
+    // Modern YouTube ships comment data as entity-payload mutations.
+    for (const p of deepFind(page, "commentEntityPayload")) {
+      const id = p.properties?.commentId;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        parent_id: parentId,
+        author_channel_id: ucOrNull(p.author?.channelId),
+        author_name: (p.author?.displayName || "").slice(0, 200),
+        text: (p.properties?.content?.content || "").slice(0, 10000),
+        like_count: parseCount(p.toolbar?.likeCountNotliked),
+        published_at: null, // only relative text is exposed here; harvest doesn't need it
+      });
+    }
+  };
+
+  const harvestComments = async (input) => {
+    say(`comments: ${input.yt_id}`);
+    const first = await innertube("next", { videoId: input.yt_id });
+    const section = deepFind(first, "itemSectionRenderer")
+      .find((s) => s.sectionIdentifier === "comment-item-section");
+    let token = section
+      ? deepFind(section, "continuationCommand").map((c) => c.token).filter(Boolean)[0]
+      : null;
+    if (!token) return { yt_id: input.yt_id, disabled: true, comments: [] };
+
+    const comments = [], seen = new Set(), replyThreads = [];
+    let guard = 0;
+    while (token && !window.AANCHA_STOP && guard++ < 100000) {
+      const page = await innertube("next", { continuation: token });
+      collectComments(page, null, seen, comments);
+      for (const thread of deepFind(page, "commentThreadRenderer")) {
+        const parentId = deepFind(thread, "commentId")[0] ||
+          deepFind(thread, "commentEntityPayload")[0]?.properties?.commentId;
+        const rt = deepFind(thread.replies || {}, "continuationCommand").map((c) => c.token).filter(Boolean)[0];
+        if (rt && parentId) replyThreads.push([rt, parentId]);
+      }
+      token = sectionNextToken(page);
+      say(`comments: ${input.yt_id} — ${seen.size}`);
+    }
+    // Expand reply threads: the professor's answers live in replies (SPEC §6).
+    for (const [rt, parentId] of replyThreads) {
+      if (window.AANCHA_STOP) break;
+      let t = rt, g2 = 0;
+      while (t && g2++ < 1000) {
+        const page = await innertube("next", { continuation: t });
+        collectComments(page, parentId, seen, comments);
+        t = sectionNextToken(page);
+      }
+    }
+    return { yt_id: input.yt_id, comments };
+  };
+
+  const harvestChat = async (input) => {
+    say(`chat: ${input.yt_id}`);
+    // The initial replay continuation lives in the watch page's ytInitialData.
+    const html = await fetchPage(`/watch?v=${input.yt_id}`);
+    const data = extractJson(html, "ytInitialData");
+    let cont = deepFind(data, "liveChatReplayContinuationData").map((c) => c.continuation).filter(Boolean)[0] ||
+               deepFind(data, "reloadContinuationData").map((c) => c.continuation).filter(Boolean)[0];
+    if (!cont) return { yt_id: input.yt_id, unavailable: true, messages: [] };
+
+    const messages = [], seen = new Set();
+    let guard = 0;
+    while (cont && !window.AANCHA_STOP && guard++ < 200000) {
+      const page = await innertube("live_chat/get_live_chat_replay", { continuation: cont });
+      const lcc = deepFind(page, "liveChatContinuation")[0];
+      if (!lcc) break;
+      for (const action of lcc.actions || []) {
+        const offset = action.replayChatItemAction?.videoOffsetTimeMsec;
+        for (const inner of action.replayChatItemAction?.actions || [action]) {
+          const r = inner.addChatItemAction?.item?.liveChatTextMessageRenderer;
+          if (!r || !r.id || seen.has(r.id)) continue;
+          seen.add(r.id);
+          messages.push({
+            id: r.id,
+            offset_ms: offset ? parseInt(offset, 10) : null,
+            author_channel_id: ucOrNull(r.authorExternalChannelId),
+            author_name: (r.authorName?.simpleText || "").slice(0, 200),
+            text: (r.message?.runs || []).map((x) => x.text || "").join("").slice(0, 10000),
+          });
+        }
+      }
+      const next = deepFind(lcc, "liveChatReplayContinuationData").map((c) => c.continuation).filter(Boolean)[0];
+      if (!next || next === cont) break;
+      cont = next;
+      if (guard % 20 === 0) say(`chat: ${input.yt_id} — ${seen.size}`);
+    }
+    return { yt_id: input.yt_id, messages };
+  };
+
+  const HANDLERS = {
+    discover, harvest_meta: harvestMeta, harvest_captions: harvestCaptions,
+    harvest_comments: harvestComments, harvest_chat: harvestChat,
+  };
 
   // ---- main loop ------------------------------------------------------------
   (async () => {

@@ -25,6 +25,8 @@ fn validator(task_type: &str) -> Result<&'static jsonschema::Validator> {
             ("discover", include_str!("../../schemas/discover.json")),
             ("harvest_meta", include_str!("../../schemas/harvest_meta.json")),
             ("harvest_captions", include_str!("../../schemas/harvest_captions.json")),
+            ("harvest_comments", include_str!("../../schemas/harvest_comments.json")),
+            ("harvest_chat", include_str!("../../schemas/harvest_chat.json")),
         ]
         .into_iter()
         .map(|(name, src)| {
@@ -41,7 +43,7 @@ fn validator(task_type: &str) -> Result<&'static jsonschema::Validator> {
 }
 
 pub fn collector_types() -> &'static [&'static str] {
-    &["discover", "harvest_meta", "harvest_captions"]
+    &["discover", "harvest_meta", "harvest_captions", "harvest_comments", "harvest_chat"]
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -161,6 +163,8 @@ pub fn submit(conn: &mut Connection, cfg: &Config, task_id: i64, result: &Value)
         "discover" => apply_discover(&tx, cfg, result)?,
         "harvest_meta" => apply_meta(&tx, &subject, result)?,
         "harvest_captions" => apply_captions(&tx, &subject, result)?,
+        "harvest_comments" => apply_comments(&tx, &subject, result)?,
+        "harvest_chat" => apply_chat(&tx, &subject, result)?,
         other => bail!("no apply logic for task type {other:?}"),
     };
     tx.execute(
@@ -202,7 +206,13 @@ pub fn counts(conn: &Connection) -> Result<Value> {
     }
     let videos: i64 = conn.query_row("SELECT COUNT(*) FROM videos", [], |r| r.get(0))?;
     let transcripts: i64 = conn.query_row("SELECT COUNT(*) FROM transcripts", [], |r| r.get(0))?;
-    Ok(json!({ "tasks": map, "videos": videos, "transcripts": transcripts }))
+    let comments: i64 = conn.query_row("SELECT COUNT(*) FROM comments", [], |r| r.get(0))?;
+    let author_replies: i64 =
+        conn.query_row("SELECT COUNT(*) FROM comments WHERE is_author = 1", [], |r| r.get(0))?;
+    Ok(json!({
+        "tasks": map, "videos": videos, "transcripts": transcripts,
+        "comments": comments, "author_replies": author_replies,
+    }))
 }
 
 // ---- apply logic ------------------------------------------------------------
@@ -213,10 +223,16 @@ fn apply_discover(conn: &Connection, cfg: &Config, result: &Value) -> Result<Val
     let channel_id = result["channel_id"].as_str().expect("validated");
     let videos = result["videos"].as_array().expect("validated");
 
+    // The channel's own id: used to flag the professor's authored replies (SPEC §6).
+    db::meta_set(conn, "channel_id", channel_id)?;
+
     for v in videos {
+        let kind = v["kind"].as_str().expect("validated");
+        // Streams have a chat replay to fetch; plain videos never do.
+        let chat_state = if kind == "stream" { "pending" } else { "na" };
         conn.execute(
-            "INSERT INTO videos (yt_id, channel_id, kind, title, approx_published, duration_s, discovered_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO videos (yt_id, channel_id, kind, title, approx_published, duration_s, chat_state, discovered_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(yt_id) DO UPDATE SET
                  title = excluded.title,
                  approx_published = COALESCE(videos.published_at, excluded.approx_published),
@@ -224,10 +240,11 @@ fn apply_discover(conn: &Connection, cfg: &Config, result: &Value) -> Result<Val
             params![
                 v["yt_id"].as_str(),
                 channel_id,
-                v["kind"].as_str(),
+                kind,
                 v["title"].as_str(),
                 v["approx_published"].as_str(),
                 v["duration_s"].as_i64(),
+                chat_state,
                 now_s,
             ],
         )?;
@@ -261,23 +278,30 @@ fn apply_discover(conn: &Connection, cfg: &Config, result: &Value) -> Result<Val
     db::meta_set(conn, "wave_end", &end)?;
 
     let mut stmt = conn.prepare(
-        "SELECT yt_id, meta_done, captions_state FROM videos
+        "SELECT yt_id, kind, meta_done, captions_state, comments_state, chat_state FROM videos
          WHERE approx_published >= ?1 AND approx_published < ?2
          ORDER BY approx_published DESC LIMIT ?3",
     )?;
-    let picked: Vec<(String, i64, String)> = stmt
+    let picked: Vec<(String, String, i64, String, String, String)> = stmt
         .query_map(params![start, end, WAVE_CAP as i64], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
         })?
         .collect::<std::result::Result<_, _>>()?;
 
     let mut created = 0;
-    for (yt_id, meta_done, captions_state) in &picked {
+    for (yt_id, kind, meta_done, captions_state, comments_state, chat_state) in &picked {
         if *meta_done == 0 {
             created += enqueue_video_task(conn, "harvest_meta", yt_id, &now_s)?;
         }
         if captions_state == "pending" {
             created += enqueue_video_task(conn, "harvest_captions", yt_id, &now_s)?;
+        }
+        if comments_state == "pending" {
+            created += enqueue_video_task(conn, "harvest_comments", yt_id, &now_s)?;
+        }
+        // Live chat replay exists only for streams.
+        if kind == "stream" && chat_state == "pending" {
+            created += enqueue_video_task(conn, "harvest_chat", yt_id, &now_s)?;
         }
     }
     tracing::info!(discovered = videos.len(), window = %format!("{start}..{end}"), tasks = created, "discover applied");
@@ -368,6 +392,95 @@ fn apply_captions(conn: &Connection, subject: &str, result: &Value) -> Result<Va
     store_raw(conn, yt_id, "captions_json3", &compact)?;
     let count = segments.as_array().map(|a| a.len()).unwrap_or(0);
     Ok(json!({ "video": yt_id, "captions": "have", "segments": count }))
+}
+
+fn apply_comments(conn: &Connection, subject: &str, result: &Value) -> Result<Value> {
+    let yt_id = result["yt_id"].as_str().expect("validated");
+    if yt_id != subject {
+        bail!("result yt_id {yt_id} does not match task subject {subject}");
+    }
+    if conn.query_row("SELECT 1 FROM videos WHERE yt_id = ?1", [yt_id], |_| Ok(())).optional()?.is_none() {
+        bail!("comments for unknown video {yt_id} — discover first");
+    }
+    if result["disabled"].as_bool() == Some(true) {
+        conn.execute("UPDATE videos SET comments_state = 'none' WHERE yt_id = ?1", [yt_id])?;
+        return Ok(json!({ "video": yt_id, "comments": "disabled" }));
+    }
+    let channel_id = db::meta_get(conn, "channel_id")?;
+    let now = Timestamp::now().to_string();
+    let mut author_replies = 0i64;
+    let comments = result["comments"].as_array().expect("validated");
+    for c in comments {
+        let acid = c["author_channel_id"].as_str();
+        let is_author = channel_id.as_deref().is_some() && acid == channel_id.as_deref();
+        if is_author {
+            author_replies += 1;
+        }
+        conn.execute(
+            "INSERT INTO comments (yt_id, video_id, parent_id, author_channel_id, author_name,
+                                   text, like_count, published_at, is_author, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(yt_id) DO UPDATE SET text = excluded.text,
+                 like_count = excluded.like_count, is_author = excluded.is_author",
+            params![
+                c["id"].as_str(),
+                yt_id,
+                c["parent_id"].as_str(),
+                acid,
+                c["author_name"].as_str().unwrap_or(""),
+                c["text"].as_str().unwrap_or(""),
+                c["like_count"].as_i64(),
+                c["published_at"].as_str(),
+                is_author as i64,
+                now,
+            ],
+        )?;
+    }
+    conn.execute("UPDATE videos SET comments_state = 'have' WHERE yt_id = ?1", [yt_id])?;
+    Ok(json!({ "video": yt_id, "comments": comments.len(), "author_replies": author_replies }))
+}
+
+fn apply_chat(conn: &Connection, subject: &str, result: &Value) -> Result<Value> {
+    let yt_id = result["yt_id"].as_str().expect("validated");
+    if yt_id != subject {
+        bail!("result yt_id {yt_id} does not match task subject {subject}");
+    }
+    if conn.query_row("SELECT 1 FROM videos WHERE yt_id = ?1", [yt_id], |_| Ok(())).optional()?.is_none() {
+        bail!("chat for unknown video {yt_id} — discover first");
+    }
+    if result["unavailable"].as_bool() == Some(true) {
+        conn.execute("UPDATE videos SET chat_state = 'none' WHERE yt_id = ?1", [yt_id])?;
+        return Ok(json!({ "video": yt_id, "chat": "unavailable" }));
+    }
+    let channel_id = db::meta_get(conn, "channel_id")?;
+    let now = Timestamp::now().to_string();
+    let mut author_msgs = 0i64;
+    let messages = result["messages"].as_array().expect("validated");
+    for m in messages {
+        let acid = m["author_channel_id"].as_str();
+        let is_author = channel_id.as_deref().is_some() && acid == channel_id.as_deref();
+        if is_author {
+            author_msgs += 1;
+        }
+        conn.execute(
+            "INSERT INTO chat_messages (yt_id, video_id, offset_ms, author_channel_id,
+                                        author_name, text, is_author, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(yt_id) DO UPDATE SET text = excluded.text, is_author = excluded.is_author",
+            params![
+                m["id"].as_str(),
+                yt_id,
+                m["offset_ms"].as_i64(),
+                acid,
+                m["author_name"].as_str().unwrap_or(""),
+                m["text"].as_str().unwrap_or(""),
+                is_author as i64,
+                now,
+            ],
+        )?;
+    }
+    conn.execute("UPDATE videos SET chat_state = 'have' WHERE yt_id = ?1", [yt_id])?;
+    Ok(json!({ "video": yt_id, "chat_messages": messages.len(), "author_messages": author_msgs }))
 }
 
 fn store_raw(conn: &Connection, yt_id: &str, kind: &str, content: &[u8]) -> Result<()> {
@@ -470,11 +583,12 @@ mod tests {
 
             let ok = discover_result(&[("aaaaaaaaaaa", "video"), ("bbbbbbbbbbb", "stream")]);
             let summary = submit(c, &cfg, discover_id, &ok)?;
-            assert_eq!(summary["tasks_created"], 4);
+            // video: meta+captions+comments (3); stream: +chat (4) => 7.
+            assert_eq!(summary["tasks_created"], 7);
 
-            // Both videos got meta+captions tasks; claim and finish them all.
-            let batch = claim(c, &cfg, "collector", 10)?;
-            assert_eq!(batch.len(), 4);
+            // Claim and finish them all; the stream's comments carry an author reply.
+            let batch = claim(c, &cfg, "collector", 20)?;
+            assert_eq!(batch.len(), 7);
             for t in &batch {
                 let result = match t.r#type.as_str() {
                     "harvest_meta" => json!({
@@ -486,6 +600,20 @@ mod tests {
                         "yt_id": t.subject, "lang": "ru", "source": "asr",
                         "segments": [ { "t_ms": 0, "d_ms": 1000, "text": "привет" } ]
                     }),
+                    "harvest_comments" => json!({
+                        "yt_id": t.subject, "comments": [
+                            { "id": format!("c-{}", t.subject), "text": "вопрос?",
+                              "author_channel_id": "UCsomebodyElse0123456789", "author_name": "fan" },
+                            { "id": format!("a-{}", t.subject), "text": "ответ", "parent_id": format!("c-{}", t.subject),
+                              "author_channel_id": "UC12345678901234567890AB", "author_name": "prof" }
+                        ]
+                    }),
+                    "harvest_chat" => json!({
+                        "yt_id": t.subject, "messages": [
+                            { "id": "m1", "offset_ms": 5000, "text": "привет из чата",
+                              "author_channel_id": "UCviewer0123456789012345", "author_name": "v" }
+                        ]
+                    }),
                     other => panic!("unexpected {other}"),
                 };
                 submit(c, &cfg, t.id, &result)?;
@@ -496,6 +624,12 @@ mod tests {
             assert!(db::meta_get(c, "last_gathered_at")?.is_some());
             let n: i64 = c.query_row("SELECT COUNT(*) FROM transcripts", [], |r| r.get(0))?;
             assert_eq!(n, 2);
+            // Author-reply detection: exactly the two "prof" comments flagged.
+            let author: i64 =
+                c.query_row("SELECT COUNT(*) FROM comments WHERE is_author = 1", [], |r| r.get(0))?;
+            assert_eq!(author, 2);
+            let chat: i64 = c.query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get(0))?;
+            assert_eq!(chat, 1); // only the stream got a chat task
             let (meta_done, cap): (i64, String) = c.query_row(
                 "SELECT meta_done, captions_state FROM videos WHERE yt_id = 'aaaaaaaaaaa'",
                 [],
