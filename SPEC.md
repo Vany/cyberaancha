@@ -1,212 +1,232 @@
 # SPEC.md — cyberaancha
 
-Status: **DRAFT v0.1** (2026-07-19). Under discussion — see §17 Open questions. Nothing frozen.
+Status: **DRAFT v0.2** (2026-07-19). Architecture settled (hub-and-edges); details under discussion — see §19.
 
 ## 1. Mission
 
-Turn the public knowledge of Prof. Ancha Baranova (YouTube channel [@AnchaBaranovaProf](https://www.youtube.com/@AnchaBaranovaProf) — videos, live streams, stream chats, comments) into a curated, cross-referenced knowledge base ("the wiki"), continuously enriched, exposed through:
+Turn the public knowledge of Prof. Ancha Baranova (YouTube [@AnchaBaranovaProf](https://www.youtube.com/@AnchaBaranovaProf) — videos, live streams, stream chats, comments) into a curated, cross-referenced knowledge base ("the wiki"), continuously enriched, exposed through:
 
-1. **Telegram bot** — answers questions in her community chat with YouTube links + timestamps and her distilled opinion;
-2. **Web admin panel** — she browses, searches, edits, and answers the open-questions queue;
-3. **MCP endpoint** — she and we research the base from Claude.
+1. **Web admin panel** (MVP) — browse, search, edit; answer the open-questions queue; test-bot tab that answers exactly like the future TG bot;
+2. **MCP endpoint** — research access from Claude (hers and ours): search tools + `article://` resources;
+3. **Telegram bot** (post-MVP) — answers in her community group with YouTube links + timestamps and her distilled opinion.
 
-The base is **scientific reference material** — much of it is information for medical doctors' practice. The system quotes and attributes the professor; it **never synthesizes new medical advice**. This is enforced structurally: production has no LLM, so the bot can only serve prebaked, attributed content.
+The base is **scientific reference material** — much of it is information for medical doctors' practice. The system quotes and attributes the professor; it **never synthesizes new medical advice**. Enforced structurally: production has no LLM.
 
-## 2. Actors
+## 2. Parts & actors
 
-| Actor | Role |
-|---|---|
-| Ancha (the professor) | Source of truth. Uses admin panel + MCP. Answers open questions. Can run harvest scripts we send her (logged-in Chrome). **We cannot use her OAuth/credentials directly.** |
-| Vany + Claude | Operators: run build cycles on the Mac, maintain the VPS. |
-| TG community | Members of the `@anchabaranova` group; ask the bot by mention. |
-| Bot | Serves prebaked answers only. |
+| Part | Where | Role |
+|---|---|---|
+| **Server** `aancha-server` | n1.serezhkin.com, Docker, `~vany/aancha` | Canonical storage (raw + processed), task queue, validation, tantivy index, REST + MCP + SPA, backups. **Never talks to YouTube, never calls an LLM.** |
+| **Collector** | browser JS, runs in youtube.com page context | Harvests metadata, captions, comments, chat replays using the browser session; posts JSON to server. Bookmarklet first; console snippet fallback. |
+| **Preparer** | Claude Code on Vany's Mac + `prompts/` + `scripts/` | Claims tasks over REST/MCP; transcribes locally (yt-dlp audio + whisper.cpp); extracts/integrates knowledge with agent reasoning guided by versioned prompts. **Not a binary.** |
+| Ancha (owner role) | panel + MCP | Browses, edits, answers questions. Later: runs collector for owner-only data. No OAuth from her, ever. |
+| Vany + Claude (admin role) | panel, SSH, Claude Code | Operate everything. |
+| Community | TG group (post-MVP) | Ask the bot. |
 
 ## 3. Hard constraints
 
-- **C1 — No LLM in production.** VPS runtime = fulltext search + templates only. All intelligence (extraction, topic merging, style, aliases, summaries) is precomputed at build time on the Mac.
-- **C2 — Heavy compute on the MacBook.** Audio download and Whisper transcription run locally. Raw audio never leaves the Mac.
-- **C3 — No owner auth.** Channel-owner-only data comes via "harvest bundle" scripts Ancha runs herself in Chrome (fallback channel, must be dead simple for her).
-- **C4 — Polite fetching.** Respect YouTube throttling: paced sequential downloads, official Data API within quota wherever possible.
-- **C5 — Small DO VPS, Docker.** One Rust service + SQLite + tantivy dir. Host: `aancha.serezhkin.com`.
-- **C6 — Security.** HTTPS everywhere; admin panel behind basic auth; MCP and import API behind bearer tokens.
+- **C1 — No LLM in production.** Server runtime = fulltext + templates. All intelligence precomputed by the preparer.
+- **C2 — Server never fetches YouTube.** Datacenter IPs get throttled/blocked; all harvesting happens in browser sessions (collector) or on the Mac (audio). One fetch path per source, at the edge.
+- **C3 — Heavy compute on the Mac.** Audio download + Whisper local; audio never uploaded, only transcript JSON.
+- **C4 — No owner credentials.** Owner-only data comes only via collector run by Ancha herself in her Chrome.
+- **C5 — Polite fetching.** Paced, jittered, resumable, chunked (`chunk_size` config, default 10 videos/wave).
+- **C6 — Channel is config.** One channel per instance. Start: `@vanyserezhkin` (test, messier data — good stress test). Production: wipe (restore/drop) and point at `@AnchaBaranovaProf`. `channel_id` stored on rows anyway (cheap multi-channel option later).
+- **C7 — Modest host.** n1: 1 vCPU, 457 MB RAM, 8.6 GB disk (1.7 GB free). Container memory-capped, tantivy writer heap small (≤128 MB), reindex niced, raw blobs zstd-compressed. Disk headroom must be revisited before full Ancha backfill (§19).
+- **C8 — Security.** TLS via existing host nginx + Let's Encrypt; app binds 127.0.0.1:8087 only. Basic auth (roles owner/admin) for panel; separate bearer tokens for collector, preparer, MCP.
 
 ## 4. System shape
 
-One Rust binary `aancha`, two runtime contexts:
-
 ```
-MacBook (builder)                        DO VPS (server, Docker)
-─────────────────                        ───────────────────────
-aancha ingest / extract / push           aancha serve
-  yt-dlp (metadata, subs, comments,        axum: admin SPA + API
-          chat replay, audio)              teloxide: TG bot (long polling)
-  whisper.cpp (local transcription)        rmcp: MCP over HTTP
-  Claude API (extraction, merge,           tantivy: fulltext (RU stemming)
-          aliases, style, profiles,        SQLite: canonical DB
-          contradictions)                  Caddy: TLS termination
-        │                                        ▲
-        └── authenticated import API ────────────┘
-            (pull state, push results)
+                 ┌──────────────────────────────────────────┐
+                 │ aancha-server @ n1 (127.0.0.1:8087)      │
+                 │  SQLite (canonical: raw+processed+queue) │
+                 │  tantivy (articles idx, transcripts idx) │
+                 │  REST ─ MCP (same handlers) ─ SPA        │
+                 │  validation: JSON Schema, ref integrity  │
+                 │  daily backup tarball + restore cmd      │
+                 └────▲──────────────▲──────────────▲───────┘
+        nginx TLS ────┤              │              │
+                      │              │              │
+        Collector (browser JS   Preparer (Claude    Consumers: panel users,
+        in youtube.com context, on Mac: whisper,    her Claude via MCP,
+        session auth, paced)    reasoning, prompts) later TG bot
 ```
 
-**Data ownership: the VPS SQLite is canonical.** The builder pulls state (watermarks, professor's answers, unanswered TG questions), computes, pushes structured deltas. SQLite never travels; audio never leaves the Mac. Tantivy index is rebuilt server-side after each import (build into a fresh dir, atomic swap).
+Flow: panel button **"Gather"** enqueues a harvest wave → collector (in whoever's browser) claims tasks, posts raw JSON → server stores raw, derives next tasks → preparer claims transcribe/extract/integrate tasks, submits validated results → server updates KB, rebuilds index, advances watermarks. Panel shows two clocks: **last gathered** / **last processed & indexed**, plus per-stage queue counts.
 
-## 5. Data sources & acquisition
+## 5. Task queue (core mechanism)
 
-| Source | Method | Auth | Notes |
+Table `tasks`: `id, type, subject (video_id|…), state (pending|claimed|done|failed), lease_until, claimed_by, attempt, payload_json, result_ref, error, created_at, done_at`.
+
+- **Claim**: `GET /api/tasks?worker=collector&limit=N` — atomic claim with lease (e.g. 30 min); expired leases return to pending. Idempotent resubmit.
+- **Validate**: every submission checked against the task type's JSON Schema (`schemas/*.json` in repo — single source of truth, referenced by prompts too) + referential integrity + size limits. Reject, don't repair.
+- **Provenance**: submissions record prompt version (preparer tasks).
+
+| Type | Worker | Granularity | Produces |
 |---|---|---|---|
-| Video metadata | YouTube Data API v3 (API key) + yt-dlp fallback | none | Both `/videos` and `/streams`. Descriptions included (often contain timecodes/links). |
-| Subtitles (SRT/auto) | yt-dlp | none | First pass; RU auto-captions are weak on medical vocabulary. |
-| Audio → transcript | yt-dlp audio + whisper.cpp on Mac | none | For videos with missing/bad subs. LLM samples sub quality to decide. |
-| Comments | Data API v3 `commentThreads` (channel-wide listing for incremental sync) | API key | Cheap, official. `authorChannelId == channel` ⇒ **professor's authoritative answer**. |
-| Live chat replay | scraper (`chat_downloader` or equiv.) | none | In scope for v1 (she actively answers chat). Paced politely. |
-| Harvest bundle | JS tool we send Ancha; she runs it in logged-in Chrome; it downloads a JSON file she sends back | her session | Fallback for anything scraping can't reach. Import path in builder. |
-| Professor's answers | admin panel "Questions" tab | basic auth | Replaces the earlier MD-file round-trip idea. |
-| TG group history | — | — | **Phase 2+** (lots of her answers there; mixed in later). |
+| `discover` | collector | channel (videos+streams tabs) | video list → upsert `videos`, spawn per-video tasks past watermark |
+| `harvest_meta` | collector | video | description, chapters, stats |
+| `harvest_captions` | collector | video | caption tracks (RU/EN) as timed segments, or `none` |
+| `harvest_comments` | collector | video | full comment threads walk |
+| `harvest_chat` | collector | stream | live chat replay walk |
+| `transcribe` | preparer | video | Whisper segments (spawned when captions missing; or by `extract` verdict `needs_transcription` when captions are garbage) |
+| `extract` | preparer | video (transcript + meta + comments + chat) | topics/facts/stances candidates, QA pairs, alias suggestions, style notes — stateless per video |
+| `integrate` | preparer | one extraction | create/merge/link decisions against live KB (agent searches first), final article updates, contradictions → questions. **Serialized** (one active) to avoid merge races |
+| *(internal)* index, backup | server | — | tantivy rebuild after integrate batch; daily tarball |
 
 ## 6. Knowledge model
 
-### Topics (the wiki)
-- **`paragraph_ru`** — one paragraph, ≤ ~800 chars: the TG answer, written at build time in the professor's voice. Contains her current distilled opinion.
-- **`story_md`** — the full narrative: everything known on the topic, chronological, with sources. For her to read/verify in the panel.
-- **`opinion timeline`** — dated *stances*: (when, where — video+timestamp / comment / chat / panel-answer, what she said, authority). The current opinion is synthesized recency-weighted; "was rethought in <link>" comes from here.
-- **`aliases`** — build-time generated recall boosters: medical + colloquial synonyms, common misspellings, latin/EN drug and gene names, typical question phrasings. This is what makes pure FTS find «геморрой» from «боль в заднице».
-- **cross-links** — related/parent/contradicts edges between topics.
+### Articles (the wiki; topics)
+- `paragraph_ru` — ≤ ~800 chars, the bot answer, professor's voice, contains current distilled opinion;
+- `story_md` — full narrative, chronological, sourced; for her reading/verification;
+- **stances** — dated opinion timeline: (when, source ref video+t/comment/chat/panel, text, authority). "Переосмыслено в <link>" comes from here; current opinion is recency-weighted;
+- **aliases** — build-time recall boosters: medical + colloquial synonyms, misspellings, latin/EN drug & gene names, typical question phrasings. This is what makes «боль в заднице» find «геморрой» in pure BM25. Misses from the test tab / future bot feed alias fixes each cycle;
+- **cross-links** — related/parent/contradicts edges;
+- links per article: **≤ 5** rendered in answers.
 
 ### Facts
-Atomic statements attached to topics. Each carries **provenance**: source ref (video+t / comment id / chat msg / panel answer), date, confidence, and **authority**:
+Atomic, attached to articles, each with provenance (source ref, date, confidence) and **authority**:
+`panel answer/edit (her, explicit) > her comment reply > her spoken words > inferred from chat/comments`.
 
-`panel answer (her, explicit) > her comment reply > her spoken words (transcript) > inferred from chat/comments`
+### Questions queue
+Merge-time contradictions, low-confidence gaps, popular unanswered queries → panel "Questions" tab with context + answer field. Her answers become top-authority facts next integrate.
 
-### Contradictions → Questions queue
-At merge time the builder LLM compares incoming facts against the topic's existing facts. Conflicts (and low-confidence gaps, and popular unanswered TG questions) become entries in the **questions queue** with context. She answers them in the panel; answers enter the next cycle as top-authority facts.
-
-### User profiles (fan service)
-Per YouTube/chat identity: handle, first/last seen, activity counts, their questions + her answers to them (Q&A pairs), and a build-time LLM summary — "who this person is, history of the relationship". For her recall, panel + MCP only. TG-side profiles: phase 2 (requires reading full group traffic — separate decision).
+### People (fan service, post-MVP UI)
+Per YouTube/chat identity: handle, activity, their questions + her answers (QA pairs), agent-written summary of the relationship. **Collected and stored from day one** (cheap to keep, painful to re-mine); tab later.
 
 ### Style profile
-Build artifact (versioned prompt/notes) describing her voice; used by the builder when writing paragraphs and stories. Not user-visible.
+Versioned artifact (meta), refreshed by preparer; guides paragraph/story writing. Not user-visible.
 
 ### Watermarks
-- videos/streams: latest processed publish date;
-- comments: latest comment timestamp (channel-wide);
-- chat: per-video, fetched once after stream ends.
+videos/streams: latest processed publish date; comments: latest comment timestamp; chat: per-stream once. Advance transactionally on successful integrate.
 
-## 7. Search (production)
+## 7. Search & answer engine (production)
 
-- **tantivy**, embedded, Russian stemming (rust-stemmers Snowball) + lowercase; EN terms indexed as-is (drug/gene names).
-- One doc per **topic**: fields `title` (boost ×3), `aliases` (×2.5), `paragraph`, `opinion`, `story`. Bot queries this index only.
-- Second index over **transcript segments** — admin panel + MCP research only, not the bot.
-- Query pipeline: normalize → stem → BM25 → threshold. Below threshold ⇒ honest "not covered" + log to `tg_queries` (feeds the questions queue and alias improvements).
-- **No embeddings in v1** (C1). If FTS recall proves insufficient, phase-2 option: tiny local embedding model (ONNX) on the VPS — noted, not planned.
-
-## 8. Telegram bot
-
-- Lives in the `@anchabaranova` group; triggers on `@aanchabot <question>` mention. (DMs: open question Q2.)
-- Interaction language: **Russian**. Sources stored in original language; paragraphs prebaked in Russian.
-- Reply template (structure, wording tuned later):
-  > `@user` про **«тема»** обсуждали в `<link&t>`, `<link&t>`; переосмыслено в `<link&t>`.
+- **tantivy**, embedded; RU Snowball stemming + lowercase; EN/latin terms indexed as-is.
+- **Articles index** (the bot's world): `title`×3, `aliases`×2.5, `paragraph`, `opinion`, `story`. One doc per article.
+- **Transcripts index** (research): segment-level; panel + MCP only.
+- Query: normalize → BM25 → threshold. Hit ⇒ answer template; miss ⇒ honest "не разбиралось" + logged to `queries` (feeds questions + aliases).
+- Answer template (test tab now, TG later; ≤5 links):
+  > про **«тема»** обсуждали в `<link&t>`, `<link&t>`; переосмыслено в `<link&t>`.
   > Мнение профессора: `<paragraph_ru>`
   > _Справочный материал по выступлениям проф. Барановой — не медицинская рекомендация._
-- Link cap per reply (proposal: ≤3 + 1 "rethought" link). Multi-topic hits: best topic + "смежные темы: …" one-liners.
-- No hits ⇒ "профессор это ещё не разбирала" + question logged.
-- Per-user rate limit; ignore non-mention traffic (privacy mode stays on in v1).
+- No embeddings in v1 (C1). Phase-2 option if recall disappoints: tiny local ONNX embedder. Noted, not planned.
 
-## 9. Admin panel (SPA)
+## 8. REST surface (sketch)
 
-Served by the same binary at `https://aancha.serezhkin.com/`, basic auth.
+```
+auth: basic+role (panel/human) · bearer: collector | preparer | mcp
+GET  /api/state                       clocks, watermarks, queue counts
+POST /api/harvest/enqueue             admin: start harvest wave (chunked)
+GET  /api/tasks?worker=&limit=        claim with lease
+POST /api/tasks/{id}/result           schema-validated submit
+POST /api/tasks/{id}/fail             error report
+GET  /api/articles?q=                 search (panel/test/MCP share it)
+GET|PUT /api/articles/{slug}          read | owner-edit (= top-authority fact)
+GET  /api/videos, /api/videos/{id}    inventory + processing status
+GET  /api/questions, POST /api/questions/{id}/answer
+POST /api/test-query                  rendered bot answer (test tab)
+GET  /api/backups                     list; scheduler is internal
+```
 
-Tabs:
-1. **Search / Browse** — wiki with cross-links; topic view: paragraph, story, opinion timeline, sources (clickable links w/ timestamps), facts with provenance. Inline edit (edits = top-authority facts).
-2. **Questions** — open questions with context + answer fields (your Q9 decision). Answered items feed the next cycle.
-3. **People** — user profiles, searchable.
-4. **Sources** — video/stream inventory, processing status per stage.
-5. **System** — watermarks, last cycle stats, **MCP URL + token** (Q10), health.
+## 9. MCP
 
-Frontend: no-build SPA — vendored Preact + htm (~4 KB, ES modules, no toolchain), vanilla CSS. (Q12: my pick; trivially replaceable.)
+Same binary, HTTP at `/mcp`, bearer token; URL + token shown in panel System tab.
+- **Tools**: `search_articles`, `get_article`, `search_transcripts`, `get_video`, `list_questions`, `answer_question`, `next_task`, `submit_result`, `kb_stats`.
+- **Resources**: `article://<slug>`, `video://<yt_id>`, `person://<id>`.
 
-## 10. MCP
+## 10. Admin panel (SPA)
 
-- Same binary, HTTP (streamable) at `/mcp`, bearer token; URL+token displayed in the panel so she can paste it into Claude.
-- Tools (read-mostly, no LLM server-side): `search_topics`, `get_topic`, `search_transcripts`, `get_video`, `list_questions`, `answer_question`, `search_people`, `get_person`, `kb_stats`.
+No-build: vendored Preact + htm, ES modules, vanilla CSS; embedded into the binary (rust-embed) — single deploy artifact.
 
-## 11. Enrichment cycle
+Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeline/sources/facts; inline edit) · **Questions** (answer fields) · **Test** (query box → exact bot answer) · **Sources** (video inventory, per-stage status) · **System** (admin only: clocks, queue, collector launcher — bookmarklet drag-target + snippet copy + fresh token, MCP URL+token, backups, config view) · *(post-MVP)* **People**.
 
-`aancha cycle` on the Mac (also = initial backfill with empty watermarks, chunked politely):
+## 11. Collector design
 
-1. **pull** state from server: watermarks, new panel answers, unanswered TG queries;
-2. **discover** videos/streams after watermark; fetch metadata, subs, comments, chat replays;
-3. **transcribe** missing/bad audio locally (whisper.cpp);
-4. **extract** (Claude, Batch API where possible): topics/facts/stances per video; QA pairs from comments & chat; profile updates; style refresh;
-5. **merge**: match against existing topics (create vs. merge decision — LLM with alias/title candidates), detect contradictions → questions; regenerate `paragraph_ru`/`story_md`/opinion for touched topics; regenerate aliases;
-6. **push** deltas to server; server rebuilds tantivy; watermarks advance **only after successful push**.
+- Panel System tab generates: **bookmarklet** (drag once, click on youtube.com) and **console snippet** (fallback if YouTube CSP blocks `javascript:` URIs — **P0 verifies**). Tampermonkey userscript = later polish for Ancha.
+- Embedded short-lived collector token; posts to `/api/...` cross-origin (CORS allows youtube.com origin, token-authenticated).
+- Runs in page context ⇒ same-origin access to innertube endpoints (browse/timedtext/comments/live-chat-replay continuations — exact endpoints are **P0** homework), with the page's own session. Paced with sleep+jitter, chunk-limited, task-resumable.
+- MVP: run in **Vany's** browser (public data only). Ancha's session needed only for owner-only extras, later.
 
-Every stage idempotent and resumable; raw fetched artifacts cached on the Mac so re-runs don't re-download.
+## 12. Preparer design
 
-## 12. Security
+- `PREP.md` playbook in repo: how a Claude session claims tasks, runs `scripts/` (yt-dlp audio fetch, whisper.cpp transcribe — model default `large-v3-turbo`, **P0 verifies**), follows `prompts/*.md`, submits.
+- Interactive for development; **headless** (`claude -p "process next N tasks"`) for routine cycles; queue is worker-agnostic — a Batch-API worker can be added later if bulk demands, without server changes.
+- Anthropic usage via subscription sessions; no API-orchestration code.
 
-- Caddy: TLS (auto-ACME) for `aancha.serezhkin.com`.
-- `/` (SPA+API): basic auth (server-side, not proxy). `/mcp`: bearer token. `/api/import`: separate builder bearer token. TG: outbound long polling only — no inbound webhook surface.
-- Secrets via env / `.env` outside the image. Tokens long-random, rotatable from CLI.
+## 13. Config (TOML, `~vany/aancha/aancha.toml`)
 
-## 13. Deployment & ops
+```toml
+[channel]  handle = "@vanyserezhkin"          # test; prod: @AnchaBaranovaProf
+[server]   bind = "127.0.0.1:8087"  public_url = "https://aancha.serezhkin.com"
+[harvest]  chunk_size = 10  pace_ms = 1500
+[index]    writer_heap_mb = 96
+[backup]   hour_utc = 3  keep = 3             # disk is tight; Vany archives off-box
+[auth]     # bcrypt hashes: owner, admin; token hashes: collector, preparer, mcp
+```
 
-- `docker-compose.yml`: `app` + `caddy`; volumes: `data/` (SQLite, WAL mode), `index/` (tantivy), `caddy/`.
-- Backups: nightly SQLite `.backup` snapshot, keep N; tantivy is derivable — not backed up. Offsite copy: open question Q7.
-- Logs: `tracing` JSON to stdout → `docker logs`.
+## 14. Security
 
-## 14. Cost & load estimates (sanity, verify in Phase 0)
+- nginx (existing on n1): new vhost `aancha.serezhkin.com` → proxy 127.0.0.1:8087; certbot Let's Encrypt.
+- App: basic auth owner/admin (bcrypt), per-purpose bearer tokens (rotatable via CLI), rate-limit + lockout on auth failures, CORS locked to youtube.com for collector endpoints only.
+- Secrets in config file (0600), outside the image; nothing in git.
 
-- Transcription: local ⇒ $0, MacBook-hours (est. ~0.1–0.3× realtime with whisper.cpp large-v3-turbo on Apple Silicon).
-- Extraction (one-time backfill): rough order $100–300 with Sonnet via Batch API for ~1000 h of transcripts; incremental cycles: single dollars.
-- Production: $0 LLM by design. VPS load trivial (thousands of topics, BM25).
+## 15. Deployment & ops (n1 facts, verified 2026-07-19)
 
-## 15. Risks & mitigations
+- n1.serezhkin.com: Ubuntu 25.04 x86_64, 1 vCPU, 457 MB RAM, 8.6 GB disk (1.7 GB free), Docker 29.2.1 + Compose v5, nginx 1.26.3 (pattern vhost: music.serezhkin.com), certbot 2.11, syncthing running, per-project dirs in `~vany`.
+- **Build**: on the Mac — `cargo-zigbuild` → static `x86_64-unknown-linux-musl` binary, SPA embedded; `FROM scratch` image (~15 MB) assembled server-side from scp'd binary (no registry, no server compiles).
+- `~vany/aancha/`: `docker-compose.yml`, `aancha.toml`, `data/` (SQLite WAL, zstd raw blobs), `index/` (tantivy, rebuildable), `backups/`.
+- Container: `mem_limit` (e.g. 256 MB), restart unless-stopped, binds 127.0.0.1 only.
+- **Backups**: internal scheduler (no cron), daily `backups/aancha-YYYY-MM-DD.tar.gz` = SQLite snapshot + config (index excluded), keep 3 pruned; Vany archives off-box. Restore: `aancha-server restore --latest --yes` (destructive: stop, wipe data, untar, reindex).
+- Logs: tracing JSON → stdout → `docker logs`.
+
+## 16. Costs
+
+- Production LLM: $0 by design. Prep: Claude subscription sessions + Mac electricity (whisper local). YouTube: $0, no API keys at all (C2). Hosting: existing box.
+
+## 17. Risks
 
 | Risk | Mitigation |
 |---|---|
-| yt-dlp blocked / throttled | pacing, caching, resume; harvest-bundle fallback via Ancha |
-| RU auto-subs quality | Whisper re-transcription path; per-fact confidence |
-| Chat replay unavailable for some streams | degrade gracefully; harvest bundle |
-| FTS recall ceiling (no embeddings) | aggressive alias generation; `tg_queries` miss-log feeds alias fixes; phase-2 local embeddings option |
-| Topic over-merging / fragmentation | merge requires LLM confirmation + panel visibility; contradicts-edges instead of destructive merges when unsure |
-| Basic auth brute force | strong creds, rate limit, fail2ban-style lockout in app |
-| TG abuse / cost | per-user rate limits (cost is ~0 anyway — no LLM) |
+| YouTube CSP blocks bookmarklet | console snippet fallback (decided); Tampermonkey later |
+| innertube endpoint drift | collector versioned, small, easy to patch; P0 documents endpoints |
+| RU auto-caption quality | `extract` verdict `needs_transcription` → Whisper path |
+| FTS recall ceiling | aggressive aliases + miss-log loop; phase-2 local embedder option |
+| Over/under-merging of articles | integrate is agentic (searches KB first), serialized; contradicts-edges instead of destructive merges when unsure; panel visibility |
+| n1 RAM/disk | C7 limits; **disk decision before Ancha backfill** (§19) |
+| Agent slop into KB | server-side JSON Schema + integrity validation, reject-don't-repair |
+| Basic auth brute force | strong creds, lockout, HTTPS only |
 
-## 16. Phases
+## 18. Phases
 
-- **P0 — Research**: verify current reality: Data API caption/comment endpoints & quotas, yt-dlp & chat scraper state, tantivy RU stemming, rmcp maturity, teloxide state, whisper.cpp turbo on M-series; count channel inventory (videos/streams/hours). Output → MEMO.md, SPEC corrections.
-- **P1 — Skeleton**: repo layout, `aancha serve` (axum, auth, SQLite migrations, health), Docker+Caddy deploy to droplet.
-- **P2 — Fetchers**: discovery, subs, comments, chat, audio; local cache; import API + push.
-- **P3 — Transcription**: whisper.cpp integration, sub-quality sampling.
-- **P4 — Extraction & KB compile**: Claude passes, merge logic, aliases, questions queue, index build.
-- **P5 — TG bot.**
-- **P6 — Admin panel.**
-- **P7 — MCP.**
-- **P8 — Cycle hardening**: end-to-end enrichment, backfill completion, backups.
+- **P0 — Research** *(next)*: CSP vs bookmarklet on youtube.com; innertube endpoints from page context (browse, timedtext, comments, live_chat replay); tantivy RU stemming; rmcp maturity; whisper.cpp turbo on Apple Silicon; axum/rust-embed/jsonschema crate picks; channel inventory count (his + hers). Output → MEMO.md + SPEC corrections.
+- **P1 — Server skeleton**: repo layout, axum + SQLite migrations + auth/roles + config + health; nginx vhost + LE; deploy pipeline (zigbuild → scratch image) to n1.
+- **P2 — Queue + collector**: task engine, discover + harvest_captions + harvest_meta on @vanyserezhkin, bookmarklet/snippet, System tab minimal.
+- **P3 — Harvest rest**: comments + chat replays.
+- **P4 — Preparer loop**: PREP.md + prompts + schemas; transcribe fallback; extract + integrate; articles/facts/stances/aliases/questions land; tantivy indexes live.
+- **P5 — Panel complete**: Browse/Search, article view+edit, Questions, Test tab, Sources.
+- **P6 — MCP**: tools + resources; token in panel. ← **MVP line**
+- **P7 — Ancha backfill**: disk decision, wipe/reconfig to her channel, chunked full-history harvest, questions loop live, her collector polish (Tampermonkey?).
+- **P8 — Telegram bot**: teloxide, group mention handling, same answer engine. Post-MVP by decision.
+- Later: People tab, TG-group history ingestion, headless scheduled cycles, embeddings fallback.
 
-(P5–P7 reorderable; bot first since it's "the main part".)
+## 19. Open questions
 
-## 17. Open questions
+1. **Disk before P7**: DO volume vs droplet resize vs aggressive raw-blob pruning after processing? (No decision needed until Ancha backfill.)
+2. Backup retention `keep = 3` OK given 1.7 GB free? (Tarballs at her scale may reach ~100+ MB each.)
+3. Port 8087 OK / any conflict I can't see? What is the service on :444?
+4. Whisper model: default `large-v3-turbo`, fall back to `large-v3` where turbo quality disappoints — OK?
 
-1. **Backfill scope** — everything since channel start? (Inventory count comes from P0.)
-2. **Bot in DMs too**, or group-only?
-3. **Reply link cap** — ≤3 + 1 "rethought" OK?
-4. **Panel auth users** — two separate basic-auth users (her / us) rather than one shared? I propose two.
-5. **Anthropic API key & budget** for build passes — whose key, monthly ceiling?
-6. **TG profiles (phase 2)** — building them needs the bot to read all group messages (privacy mode off) or a history export. Defer decision, confirm deferral.
-7. **Backups offsite** — DO Spaces, or local-only snapshots for now?
-8. **Bot username** — is `@aanchabot` registered? (BotFather, your side.)
-9. **DNS** — `aancha.serezhkin.com` → droplet A-record, Caddy takes it from there. Confirm you control DNS.
+## 20. Decision log
 
-## 18. Decision log
-
-- 2026-07-19 — Stack: Rust single binary (axum, teloxide, rusqlite, tantivy, rmcp), SQLite canonical on VPS, no-build Preact+htm SPA, Docker+Caddy on DO. — *(V+C)*
+- 2026-07-19 — Stack: Rust (axum, rusqlite, tantivy, rmcp; teloxide post-MVP), SQLite canonical on VPS, no-build Preact+htm SPA embedded via rust-embed. — *(V+C)*
 - 2026-07-19 — **No LLM in production**; all intelligence precomputed. — *(V)*
-- 2026-07-19 — Transcription local on MacBook; audio never uploaded. — *(V)*
-- 2026-07-19 — No owner OAuth; harvest-bundle scripts run by Ancha as fallback channel. — *(V)*
-- 2026-07-19 — Questions round-trip via admin panel tab, not MD files. — *(V, supersedes first idea)*
-- 2026-07-19 — Chat replay in v1 scope (she answers chat actively). — *(V)*
-- 2026-07-19 — KB stores original language; user-facing output Russian. — *(V)*
-- 2026-07-19 — Server-canonical data; builder pushes deltas over authenticated API; index rebuilt server-side. — *(C, veto-checkable)*
-- 2026-07-19 — Alias-based recall instead of embeddings (C1); local-embedding fallback noted for phase 2. — *(C, veto-checkable)*
+- 2026-07-19 — **Hub-and-edges**: server = storage+queue+validation+index only; collector in browser page context; preparer = Claude Code + prompts + scripts, **no second binary**. — *(V+C)*
+- 2026-07-19 — **Server never fetches YouTube** (no Data API keys at all); all harvest via browser/Mac edges. — *(V+C)*
+- 2026-07-19 — MVP = admin panel with Test tab; **all Telegram postponed** past MVP. — *(V)*
+- 2026-07-19 — Collector: bookmarklet first, console snippet fallback. — *(V)*
+- 2026-07-19 — Two panel roles: owner (Ancha), admin (Vany). — *(V)*
+- 2026-07-19 — Channel in config; test on @vanyserezhkin; ≤5 links per article answer. — *(V)*
+- 2026-07-19 — Backups: service-internal daily dated tarball (no cron), keep-N, off-box archiving manual; `restore --latest` drop-and-restore command. — *(V+C)*
+- 2026-07-19 — Deploy: n1.serezhkin.com `~vany/aancha`, existing nginx + Let's Encrypt, app on 127.0.0.1:8087, scratch image from Mac-built static musl binary. — *(V+C)*
+- 2026-07-19 — Anthropic: no API-orchestration code; prompts as artifacts executed by Claude sessions. — *(V)*
