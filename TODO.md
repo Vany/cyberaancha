@@ -36,9 +36,9 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [x] answer engine + /api/test-query (≤5 links, newest-first, disclaimer, honest miss + query log)
 - [x] preparer + panel endpoints: prep claim/result/search, transcribe claim/result, articles search/get/put, questions list/answer, process/enqueue
 - [x] 12 tests incl. full harvest→integrate→reindex→answer + needs_transcription→transcribe→reintegrate
-- [ ] prompts/integrate.md + PREP.md playbook (the Claude-session instructions)
-- [ ] scripts/transcribe_pending.sh (yt-dlp audio → whisper.cpp; install whisper-cpp + model)
-- [ ] run full loop on a real harvested week; iterate prompt quality
+- [x] prompts/integrate.md (v1) + PREP.md playbook (the Claude-session instructions)
+- [x] scripts/transcribe_pending.sh (yt-dlp audio → whisper.cpp; curl+jq, unattended, fail-loud)
+- [ ] install whisper-cpp + model on Mac; run full loop on a real harvested week; iterate prompt quality
 - Note: extract+integrate collapsed into one `integrate` pass (MEMO); RU stemming imperfect → aliases carry inflections (research/)
 
 ## P5 — admin panel
