@@ -33,6 +33,13 @@
   box.append(stopBtn);
   const say = (msg) => { box.childNodes[0].textContent = "aancha: " + msg; };
 
+  // Verbose console logging (on by default; set AANCHA_CFG.debug=false to quiet).
+  // Filter the console by "aancha" to follow along.
+  const DEBUG = cfg.debug !== false;
+  const dbg = (...a) => { if (DEBUG) console.log("%caancha", "color:#3ba;font-weight:bold", ...a); };
+  const dwarn = (...a) => console.warn("aancha:", ...a);
+  dbg("collector loaded", { server: cfg.server, pace_ms: cfg.pace_ms || 1500, loggedIn: /SAPISID=/.test(document.cookie) });
+
   // ---- helpers --------------------------------------------------------------
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const pace = async () => sleep((cfg.pace_ms || 1500) + Math.random() * 700);
@@ -58,17 +65,17 @@
   // verified works). Sending a SAPISIDHASH auth header on a logged-in session
   // was breaking these public calls — losing everything. Owner-only/private data
   // (P7) will opt back into the session behind a flag; public harvest never needs it.
-  const innertube = async (endpoint, body) => {
+  const innertube = async (endpoint, body, creds = "omit") => {
     await pace();
     const ctx = ytcfgGet("INNERTUBE_CONTEXT");
     if (!ctx) throw new Error("no INNERTUBE_CONTEXT on this page — open any watch/channel page");
     const res = await fetch(`${location.origin}/youtubei/v1/${endpoint}?prettyPrint=false`, {
       method: "POST",
-      credentials: "omit",
+      credentials: creds,
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ context: ctx, ...body }),
     });
-    if (!res.ok) throw new Error(`innertube ${endpoint} -> ${res.status}`);
+    if (!res.ok) { dwarn(`innertube ${endpoint} (${creds}) -> ${res.status}`); throw new Error(`innertube ${endpoint} -> ${res.status}`); }
     return res.json();
   };
 
@@ -184,6 +191,7 @@
       }
     }
     if (!channelId) throw new Error("channel_id not found in ytInitialData");
+    dbg(`discover: channel ${channelId}, ${videos.length} videos (${videos.filter((v) => v.kind === "stream").length} streams)`);
     return { channel_id: channelId, videos };
   };
 
@@ -208,11 +216,26 @@
     };
   };
 
+  // Fetch the player response, returning caption tracks. Public (omit) first;
+  // if that yields none and we have a session, retry with it — captions are
+  // sometimes withheld from anonymous player calls. Logs what each path sees.
+  const playerWithCaptions = async (videoId) => {
+    for (const creds of (/SAPISID=/.test(document.cookie) ? ["omit", "same-origin"] : ["omit"])) {
+      const p = await innertube("player", { videoId }, creds);
+      const status = p?.playabilityStatus?.status;
+      const tracks = p?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+      dbg(`captions ${videoId} [${creds}]: playability=${status}, captions=${p?.captions ? "obj" : "absent"}, tracks=${tracks.length}`,
+        tracks.map((t) => `${t.languageCode}${t.kind === "asr" ? "(auto)" : ""}`));
+      if (tracks.length) return { p, tracks, creds };
+      if (creds === "omit") dbg(`captions ${videoId}: no tracks anonymously; player top keys:`, Object.keys(p || {}));
+    }
+    return { p: null, tracks: [], creds: null };
+  };
+
   const harvestCaptions = async (input) => {
     say(`captions: ${input.yt_id}`);
-    const p = await innertube("player", { videoId: input.yt_id });
-    const tracks = p?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-    if (!tracks.length) return { yt_id: input.yt_id, none: true };
+    const { tracks } = await playerWithCaptions(input.yt_id);
+    if (!tracks.length) { dbg(`captions ${input.yt_id}: NONE`); return { yt_id: input.yt_id, none: true }; }
     // Prefer Russian, then any; manual over ASR within the same language.
     const score = (t) => (t.languageCode?.startsWith("ru") ? 2 : 0) + (t.kind === "asr" ? 0 : 1);
     const track = tracks.sort((a, b) => score(b) - score(a))[0];
@@ -220,6 +243,7 @@
     const url = new URL(track.baseUrl, location.origin);
     url.searchParams.set("fmt", "json3");
     const res = await fetch(url, { credentials: "omit" });
+    dbg(`captions ${input.yt_id}: timedtext ${res.status} for ${track.languageCode}${track.kind === "asr" ? "(auto)" : ""}`);
     if (!res.ok) throw new Error(`timedtext -> ${res.status}`);
     const j3 = await res.json();
     const segments = (j3.events || [])
@@ -230,6 +254,7 @@
         text: e.segs.map((s) => s.utf8).join("").replace(/\s+/g, " ").trim().slice(0, 2000),
       }))
       .filter((s) => s.text);
+    dbg(`captions ${input.yt_id}: ${segments.length} segments`);
     if (!segments.length) return { yt_id: input.yt_id, none: true };
     return {
       yt_id: input.yt_id,
@@ -316,6 +341,7 @@
         t = sectionNextToken(page);
       }
     }
+    dbg(`comments ${input.yt_id}: ${comments.length} (${comments.filter((c) => c.author_channel_id).length} with channel id)`);
     return { yt_id: input.yt_id, comments };
   };
 
@@ -356,6 +382,7 @@
       cont = next;
       if (guard % 20 === 0) say(`chat: ${input.yt_id} — ${seen.size}`);
     }
+    dbg(`chat ${input.yt_id}: ${messages.length} messages`);
     return { yt_id: input.yt_id, messages };
   };
 
@@ -374,12 +401,14 @@
         if (!tasks.length) break;
         for (const t of tasks) {
           if (window.AANCHA_STOP) break;
+          dbg(`task #${t.id} ${t.type} ${t.subject}`);
           try {
             const result = await HANDLERS[t.type](t.input);
-            await api(`/api/tasks/${t.id}/result`, { method: "POST", body: JSON.stringify(result) });
+            const summary = await api(`/api/tasks/${t.id}/result`, { method: "POST", body: JSON.stringify(result) });
+            dbg(`task #${t.id} ${t.type} OK →`, summary);
             done++;
           } catch (e) {
-            console.warn("aancha task failed", t, e);
+            dwarn(`task #${t.id} ${t.type} FAILED:`, e);
             await api(`/api/tasks/${t.id}/fail`, {
               method: "POST",
               body: JSON.stringify({ error: String(e).slice(0, 500) }),
