@@ -1,0 +1,41 @@
+X2M908I5_wY|17637|Тотальный рефакторинг связанности компонентов controlrake. G
+0_qQpdepn_g|13950|небольшая прессконференция и много рефакторинга на го, прост
+7fPKVIqxoGc|14141|Попробуем сделать vpn на websocket. заодно tcp/ip подучим. (
+zh31-_Rg-fw|11344|Теперь Раст !android + opencv , на римворлд сил может не ост
+_sqUl6u-7Q4|18123|android + opencv , на римворлд времени может не остаться
+HUD1ixWaxuw|27584|Нейровёрстка, а потом римворлд.
+TsL1pkSw0iM|19529|Весёлый рефакторинг и релиз.
+1KYTJ_6rJVw|22767|ютуб чатик и финальный релиз
+iYd3RIEXP6k|19064|ютуб чатик и управление контейнером виджетов
+GzOyNuGDri0|23251|Парсер json-schema и генератор парсеров.
+l-6XDOfznhQ|17999|Парсер json-schema и генератор парсеров.
+JSbq6aeMX7Q|13334|Попробуем компилятор го на зуб.
+T5ax-cH54io|47|Попробуем компилятор го на зуб.
+VsVlYyPi-RA|21374|Контроллер на мобилке для стримминга. (video effect buttons)
+hN6SRXk9MrQ|19127|Контроллер на мобилке для стримминга.
+0OosBWZjUSo|17213|Контроллер на мобилке для стримминга.
+arKKdMwQf9U|13385|All the mods 5  STREAM #8 (15 мая 22:00)
+lCbcMXn58jA|10730|Makemod #2 (may 13 21:00MSK)
+bRuDXi7bS2g|10598|All the mods 5  STREAM #7 (11 мая 21:00)
+9SW6Q1TZ2_k|12744|Makemod #1 (may 9 21:00MSK)
+n9dglIZKD3c|13739|All the mods 5  STREAM #6 (8 мая 21:00)
+fPT6AG9DvqY|16952|All the mods 5  STREAM #5 (6 мая 21:00)
+3AXrkrH1FaQ|20025|All the mods 5  STREAM #4 (4 мая 20:00)
+Dm9Y_uo--PA|15365|All the mods 5  STREAM #3 (1 мая 21:00)
+bllJicy6Suo|15714|All the mods 5  STREAM #2
+rHVtRgkgbMU|18639|All the mods 5  STREAM #1
+SlAazArXtjs|20148|Программерское шоу #2
+h68vaXM_Mwc|10750|Программерское шоу #1
+5tZrRUV-an4|7387|#15 2019 New year minecraft Happy new year stream
+EnAtKh5M2vo|10963|#11 2019 New year minecraft Q&A stream
+rBKTqLqalkY|14352|#2 2019 New year minecraft Starting stream
+9_Uah92C28s|21967|#1 2019 New year minecraft Starting
+MdrFzZfUX14|113|DoubleCodeShow #1 Начало коктейль машины
+PlrWRJpjhqk|19637|Пишем контракты для insolar. (testnet 1.0) (decentralised bl
+sarFt2X-U3I|5341|Programming of golang generics
+R8oAhmvxqjA|111|DoubleCodeShow #1 Начало коктейль машины
+39gBRfqTo3w|7711|DoubleCodeShow #1 Начало коктейль машины
+WcbNqpxCUOc|8343|Прямая трансляция пользователя Vany Serezhkin
+ceBXvZ4Ej_8|590|DoubleCodeShow #1
+fGTwD8L6XhI|51|DoubleCodeShow #0
+DTT1dUEb188|4377|webinar

@@ -1,6 +1,6 @@
 # SPEC.md — cyberaancha
 
-Status: **DRAFT v0.2** (2026-07-19). Architecture settled (hub-and-edges); details under discussion — see §19.
+Status: **DRAFT v0.3** (2026-07-19). Architecture settled (hub-and-edges); P0 research done — facts baked in (see `research/p0-findings.md`); remaining opens — §19.
 
 ## 1. Mission
 
@@ -144,15 +144,16 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 
 ## 11. Collector design
 
-- Panel System tab generates: **bookmarklet** (drag once, click on youtube.com) and **console snippet** (fallback if YouTube CSP blocks `javascript:` URIs — **P0 verifies**). Tampermonkey userscript = later polish for Ancha.
-- Embedded short-lived collector token; posts to `/api/...` cross-origin (CORS allows youtube.com origin, token-authenticated).
-- Runs in page context ⇒ same-origin access to innertube endpoints (browse/timedtext/comments/live-chat-replay continuations — exact endpoints are **P0** homework), with the page's own session. Paced with sleep+jitter, chunk-limited, task-resumable.
+- **Pure-fetch, zero DOM script injection** (P0-verified: YouTube CSP has no `connect-src`/`default-src` ⇒ page-context `fetch()` to our server is unrestricted; Trusted Types is enforced but only bites script-injection sinks, which we don't use). Console snippet therefore guaranteed; **bookmarklet vs snippet decided in testing** (Chrome CSP quirks).
+- Panel System tab generates both (bookmarklet drag-target + snippet copy) with an embedded short-lived collector token; posts cross-origin to `/api/...` (CORS allows youtube.com origin, token-authenticated). Tampermonkey userscript = later polish for Ancha.
+- Endpoints (P0-mapped, all same-origin from page context; YouTube serves no CORS headers to outsiders — which is exactly why the collector lives in the page): `get_transcript` → `captionTracks`/timedtext `fmt=json3` → `/player` (Android client) for captions; `ytInitialData` + `/youtubei/v1/next` continuations for comments; `live_chat_replay` continuation + `get_live_chat_replay` for chat; `/youtubei/v1/browse` for channel tabs.
+- **Reads live `ytcfg`/`INNERTUBE_CONTEXT` from the page — never hardcodes client version** (rolls weekly); computes SAPISIDHASH when a session is present (logged-out works for public data). Paced with sleep+jitter, chunk-limited, task-resumable.
 - MVP: run in **Vany's** browser (public data only). Ancha's session needed only for owner-only extras, later.
 
 ## 12. Preparer design
 
 - Two kinds of Mac-side work, split by whether it needs a brain:
-  - **Mechanical → standalone scripts** (`scripts/`): `transcribe_pending.sh` loops claim → yt-dlp audio → whisper.cpp (model default `large-v3-turbo`, **P0 verifies**) → submit, fully unattended — a batch of 50 videos must not burn agent attention. curl + jq, no LLM.
+  - **Mechanical → standalone scripts** (`scripts/`): `transcribe_pending.sh` loops claim → yt-dlp audio → whisper.cpp (model `large-v3-turbo q5_0` + Metal, P0-verified: RU ≈ full v3 quality, ~15–20× realtime on the M4 Max; RU fine-tunes exist as quality fallback) → submit, fully unattended — a batch of 50 videos must not burn agent attention. curl + jq, no LLM.
   - **Judgment → Claude sessions**: `extract`, `integrate`, guided by `PREP.md` playbook + `prompts/*.md`.
 - Interactive for development; **headless** (`claude -p "process next N tasks"`) for routine cycles; queue is worker-agnostic — a Batch-API worker can be added later if bulk demands, without server changes.
 - Anthropic usage via subscription sessions; no API-orchestration code.
@@ -183,16 +184,18 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - **Backups**: internal scheduler (no cron), daily `backups/aancha-YYYY-MM-DD.tar.gz` = SQLite snapshot + config (index excluded), keep 3 pruned; Vany archives off-box. **Immediate backup on demand**: `aancha-server backup` CLI subcommand + System-tab button (`POST /api/backups`) — same tarball format, timestamped, e.g. before risky operations. Restore: `aancha-server restore --latest --yes` (destructive: stop, wipe data, untar, reindex).
 - Logs: tracing JSON → stdout → `docker logs`.
 
-## 16. Costs
+## 16. Costs & volumes (P0 facts, 2026-07-19)
 
-- Production LLM: $0 by design. Prep: Claude subscription sessions + Mac electricity (whisper local). YouTube: $0, no API keys at all (C2). Hosting: existing box.
+- Inventories: **@vanyserezhkin 1300 videos / 1166 h + 41 streams / 155 h** (test channel is *bigger* than prod — chunked testing mandatory); **@AnchaBaranovaProf 767 videos / 494 h + 504 streams / 800 h ≈ 1294 h**.
+- **Captions-first is load-bearing**: Whisper fills gaps only (~15 % missing/bad ⇒ ~190 h audio ≈ 10–13 h M4 Max compute); even full re-transcription of a channel ≈ a background weekend, not a blocker.
+- Extraction (prod backfill): ~1300 h ≈ 15–20 M input tokens over ~1270 `extract` tasks — Claude subscription sessions, chunked over cycles. Production LLM: $0 by design. YouTube: $0, no API keys (C2). Hosting: existing box.
 
 ## 17. Risks
 
 | Risk | Mitigation |
 |---|---|
-| YouTube CSP blocks bookmarklet | console snippet fallback (decided); Tampermonkey later |
-| innertube endpoint drift | collector versioned, small, easy to patch; P0 documents endpoints |
+| YouTube CSP blocks bookmarklet | console snippet fallback (decided); Tampermonkey later. P0: snippet guaranteed (pure-fetch design) |
+| innertube endpoint / client-version drift (weekly rolls) | collector reads live `ytcfg`, never hardcodes; small versioned collector, easy to patch |
 | RU auto-caption quality | `extract` verdict `needs_transcription` → Whisper path |
 | FTS recall ceiling | aggressive aliases + miss-log loop; phase-2 local embedder option |
 | Over/under-merging of articles | integrate is agentic (searches KB first), serialized; contradicts-edges instead of destructive merges when unsure; panel visibility |
@@ -202,7 +205,7 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 
 ## 18. Phases
 
-- **P0 — Research** *(next)*: CSP vs bookmarklet on youtube.com; innertube endpoints from page context (browse, timedtext, comments, live_chat replay); tantivy RU stemming; rmcp maturity; whisper.cpp turbo on Apple Silicon; axum/rust-embed/jsonschema crate picks; channel inventory count (his + hers). Output → MEMO.md + SPEC corrections.
+- **P0 — Research** ✅ *(2026-07-19)*: CSP verified (pure-fetch collector viable), innertube endpoints mapped, tantivy 0.26.1 RU ✓, rmcp 2.2.0 ✓, whisper turbo q5_0 ✓, inventories counted. Findings: `research/p0-findings.md`, summarized in MEMO.md. Crate-version picks happen at `cargo add` time (P1).
 - **P1 — Server skeleton**: repo layout, axum + SQLite migrations + auth/roles + config + health; nginx vhost + LE; deploy pipeline (zigbuild → scratch image) to n1.
 - **P2 — Queue + collector**: task engine, discover + harvest_captions + harvest_meta on @vanyserezhkin, bookmarklet/snippet, System tab minimal.
 - **P3 — Harvest rest**: comments + chat replays.
