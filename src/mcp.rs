@@ -11,8 +11,8 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
 };
-use rmcp::transport::streamable_http_server::StreamableHttpService;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::json;
 use std::sync::Arc;
@@ -185,10 +185,32 @@ impl ServerHandler for AanchaMcp {
 
 /// Build the streamable-HTTP MCP service to nest at `/mcp`. A fresh handler per
 /// session; db/index are cheap to clone (Arc/handle).
-pub fn service(db: Db, index: Arc<SearchIndex>) -> StreamableHttpService<AanchaMcp, LocalSessionManager> {
+///
+/// `public_host` is the panel/MCP hostname (from public_url): rmcp's default
+/// DNS-rebinding protection accepts only loopback, so behind nginx we must add
+/// our own host or every proxied request is rejected with a 403.
+pub fn service(
+    db: Db,
+    index: Arc<SearchIndex>,
+    public_host: Option<String>,
+) -> StreamableHttpService<AanchaMcp, LocalSessionManager> {
+    let mut allowed_hosts: Vec<String> =
+        vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
+    if let Some(host) = public_host {
+        allowed_hosts.push(host);
+    }
+    // Config is #[non_exhaustive] — use the builder method, not a struct literal.
+    let config = StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts);
     StreamableHttpService::new(
         move || Ok(AanchaMcp::new(db.clone(), index.clone())),
         Arc::new(LocalSessionManager::default()),
-        Default::default(),
+        config,
     )
+}
+
+/// Extract the bare host from a public_url like `https://youtube.serezhkin.com`.
+pub fn host_of(public_url: &str) -> Option<String> {
+    let after_scheme = public_url.split("://").nth(1).unwrap_or(public_url);
+    let host = after_scheme.split(['/', ':']).next()?.trim();
+    (!host.is_empty()).then(|| host.to_string())
 }

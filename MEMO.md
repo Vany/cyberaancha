@@ -2,6 +2,12 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — MVP live end-to-end on youtube.serezhkin.com (HTTPS)
+
+- Full stack verified over HTTPS through nginx: panel /admin (200), /api/test-query hits via alias, and **MCP full handshake** (initialize→tools/list→tools/call). All 5 MCP tools work from a remote client.
+- **rmcp gotcha that bit prod:** StreamableHttpService has DNS-rebinding protection — `allowed_hosts` defaults to loopback only, so every nginx-proxied request 403'd with "Host header is not allowed". Fix: `StreamableHttpServerConfig::default().with_allowed_hosts([...])` seeded with the public host derived from `public_url` (`mcp::host_of`). Both config structs (ServerInfo, StreamableHttpServerConfig) are #[non_exhaustive] → builder methods, not struct literals. nginx passes MCP SSE fine (no proxy_buffering change needed).
+- Deployed build = MVP complete. Bootstrap creds (admin pw, mcp/collector/preparer tokens) shown in dev session → **Vany must rotate before real use**.
+
 ## 2026-07-19 — P5 panel + P6 MCP: MVP line reached
 
 - **P5 panel** (`web/admin.html`, built by a subagent per `web/SPEC.md`): single self-contained vanilla-JS file, XSS-safe via a text-node DOM builder. Tabs: Browse (search + article detail + owner edit/delete), Questions (answer), Test (verbatim bot answer), Sources (video inventory + status chips), System (admin-only: clocks/watermarks/queue, harvest+process buttons, backups, collector launcher, MCP slot). Subagent caught a real bug: `get_article` returned only `citations`, so owner edits would wipe facts/links → **fixed**: ArticleView now returns full stances/facts/links, panel re-sends them verbatim (lossless).

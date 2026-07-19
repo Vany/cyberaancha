@@ -100,8 +100,9 @@ pub fn router(state: AppState) -> axum::Router {
 
     // MCP over streamable HTTP at /mcp, bearer-gated (mcp token). rmcp's service
     // is a tower Service nested here; the middleware guards it.
+    let mcp_host = crate::mcp::host_of(&state.cfg.server.public_url);
     let mcp = axum::Router::new()
-        .nest_service("/mcp", crate::mcp::service(state.db.clone(), state.index.clone()))
+        .nest_service("/mcp", crate::mcp::service(state.db.clone(), state.index.clone(), mcp_host))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth_mw::mcp_auth));
 
     axum::Router::new()
