@@ -51,4 +51,5 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [ ] teloxide, group mention handling, same answer engine, per-user rate limits
 
 ## Later
-- People tab; TG-group history ingestion; headless scheduled cycles (`claude -p`); local-embeddings recall fallback; git remote on n1 (**awaiting Vany's yes/no**)
+- People tab; TG-group history ingestion; headless scheduled cycles (`claude -p`); local-embeddings recall fallback
+- ~~git remote on n1~~ → resolved: github.com/Vany/cyberaancha (private) is origin
