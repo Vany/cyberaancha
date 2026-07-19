@@ -29,7 +29,7 @@ The base is **scientific reference material** — much of it is information for 
 - **C2 — Server never fetches YouTube.** Datacenter IPs get throttled/blocked; all harvesting happens in browser sessions (collector) or on the Mac (audio). One fetch path per source, at the edge.
 - **C3 — Heavy compute on the Mac.** Audio download + Whisper local; audio never uploaded, only transcript JSON.
 - **C4 — No owner credentials.** Owner-only data comes only via collector run by Ancha herself in her Chrome.
-- **C5 — Polite fetching.** Paced, jittered, resumable, chunked (`chunk_size` config, default 10 videos/wave).
+- **C5 — Polite fetching.** Paced, jittered, resumable, and **time-windowed**: one harvest wave covers one window of publish dates (`window_days`, default 7). Backfill walks windows backward from the oldest watermark; enrichment walks forward from the newest. Channel size is therefore never a limitation.
 - **C6 — Channel is config.** One channel per instance. Start: `@vanyserezhkin` (test, messier data — good stress test). Production: wipe (restore/drop) and point at `@AnchaBaranovaProf`. `channel_id` stored on rows anyway (cheap multi-channel option later).
 - **C7 — Modest host.** n1: 1 vCPU, 457 MB RAM, 8.6 GB disk (1.7 GB free). Container memory-capped, tantivy writer heap small (≤128 MB), reindex niced, raw blobs zstd-compressed. Disk headroom must be revisited before full Ancha backfill (§19).
 - **C8 — Security.** TLS via existing host nginx + Let's Encrypt; app binds 127.0.0.1:8087 only. Basic auth (roles owner/admin) for panel; separate bearer tokens for collector, preparer, MCP.
@@ -64,7 +64,7 @@ Table `tasks`: `id, type, subject (video_id|…), state (pending|claimed|done|fa
 
 | Type | Worker | Granularity | Produces |
 |---|---|---|---|
-| `discover` | collector | channel (videos+streams tabs) | video list → upsert `videos`, spawn per-video tasks past watermark |
+| `discover` | collector | channel (videos+streams tabs, flat listing — cheap) | video list → upsert `videos`; server spawns per-video tasks only for the active time window |
 | `harvest_meta` | collector | video | description, chapters, stats |
 | `harvest_captions` | collector | video | caption tracks (RU/EN) as timed segments, or `none` |
 | `harvest_comments` | collector | video | full comment threads walk |
@@ -98,7 +98,7 @@ Per YouTube/chat identity: handle, activity, their questions + her answers (QA p
 Versioned artifact (meta), refreshed by preparer; guides paragraph/story writing. Not user-visible.
 
 ### Watermarks
-videos/streams: latest processed publish date; comments: latest comment timestamp; chat: per-stream once. Advance transactionally on successful integrate.
+Two per channel: **oldest-processed** (backfill walks it backward window by window) and **newest-processed** (enrichment walks it forward). Comments: latest comment timestamp; chat: per-stream once. Advance transactionally on successful integrate.
 
 ## 7. Search & answer engine (production)
 
@@ -163,11 +163,12 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 ```toml
 [channel]  handle = "@vanyserezhkin"          # test; prod: @AnchaBaranovaProf
 [server]   bind = "127.0.0.1:8087"  public_url = "https://aancha.serezhkin.com"
-[harvest]  chunk_size = 10  pace_ms = 1500
+[harvest]  window_days = 7  pace_ms = 1500    # one wave = one week of publish dates
 [index]    writer_heap_mb = 96
 [backup]   hour_utc = 3  keep = 3             # disk is tight; Vany archives off-box
-[auth]     # bcrypt hashes: owner, admin; token hashes: collector, preparer, mcp
 ```
+
+**Secrets live in the DB, not the config**: password hashes (argon2, stable 0.5 line) and token hashes (blake3) sit in an `auth` table — one canonical store, covered by backups automatically; managed via CLI `set-password` / `gen-token`. Config file stays secret-free.
 
 ## 14. Security
 
@@ -238,3 +239,5 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - 2026-07-19 — Anthropic: no API-orchestration code; prompts as artifacts executed by Claude sessions. — *(V)*
 - 2026-07-19 — Immediate backup: `aancha-server backup` CLI + System-tab button, same tarball as daily. — *(V)*
 - 2026-07-19 — Mac-side split: mechanical tasks (transcribe) = unattended shell scripts; judgment tasks (extract/integrate) = Claude sessions. — *(V+C)*
+- 2026-07-19 — Harvest is **time-windowed** (default 7 days per wave), not video-counted; two watermarks (oldest/newest). — *(V+C)*
+- 2026-07-19 — Secrets in DB (auth table), config secret-free; argon2 stable 0.5 (0.6 still RC). — *(C)*

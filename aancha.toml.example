@@ -1,0 +1,23 @@
+# Copy to aancha.toml (gitignored). No secrets here — secrets live in the DB
+# via `aancha-server set-password` / `gen-token` (SPEC §13).
+
+[channel]
+handle = "@vanyserezhkin" # production: "@AnchaBaranovaProf"
+
+[server]
+bind = "127.0.0.1:8087"
+public_url = "https://aancha.serezhkin.com"
+data_dir = "data"
+index_dir = "index"
+
+[harvest]
+window_days = 7 # one wave = one week of publish dates
+pace_ms = 1500
+
+[index]
+writer_heap_mb = 96 # n1 has 457 MB total — stay small
+
+[backup]
+dir = "backups"
+hour_utc = 3
+keep = 3

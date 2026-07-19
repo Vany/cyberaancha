@@ -1,0 +1,11 @@
+/target
+/data
+/index
+/backups
+/cache
+*.db
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+aancha.toml
