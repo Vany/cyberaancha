@@ -14,7 +14,9 @@
     alert("aancha: run this on a youtube.com page");
     return;
   }
-  if (window.AANCHA_RUNNING) { console.warn("aancha: already running"); return; }
+  // Displayed brand (from the panel's config; internal globals stay AANCHA_*).
+  const brand = cfg.brand || "aancha";
+  if (window.AANCHA_RUNNING) { console.warn(brand + ": already running"); return; }
   window.AANCHA_RUNNING = true;
   window.AANCHA_STOP = false;
 
@@ -24,20 +26,20 @@
     "position:fixed;bottom:12px;right:12px;z-index:99999;background:#111;color:#8f8;" +
     "font:12px/1.5 monospace;padding:10px 14px;border-radius:8px;max-width:340px;" +
     "box-shadow:0 2px 12px rgba(0,0,0,.5);white-space:pre-wrap";
-  box.textContent = "aancha: starting…";
+  box.textContent = brand + ": starting…";
   const stopBtn = document.createElement("button");
   stopBtn.textContent = "stop";
   stopBtn.style.cssText = "margin-left:10px;background:#611;color:#fff;border:0;border-radius:4px;padding:1px 8px;cursor:pointer";
   stopBtn.onclick = () => { window.AANCHA_STOP = true; say("stopping after current task…"); };
   document.body.append(box);
   box.append(stopBtn);
-  const say = (msg) => { box.childNodes[0].textContent = "aancha: " + msg; };
+  const say = (msg) => { box.childNodes[0].textContent = brand + ": " + msg; };
 
   // Verbose console logging (on by default; set AANCHA_CFG.debug=false to quiet).
-  // Filter the console by "aancha" to follow along.
+  // Filter the console by the brand to follow along.
   const DEBUG = cfg.debug !== false;
-  const dbg = (...a) => { if (DEBUG) console.log("%caancha", "color:#3ba;font-weight:bold", ...a); };
-  const dwarn = (...a) => console.warn("aancha:", ...a);
+  const dbg = (...a) => { if (DEBUG) console.log("%c" + brand, "color:#3ba;font-weight:bold", ...a); };
+  const dwarn = (...a) => console.warn(brand + ":", ...a);
   dbg("collector loaded", { server: cfg.server, pace_ms: cfg.pace_ms || 1500, loggedIn: /SAPISID=/.test(document.cookie) });
 
   // ---- helpers --------------------------------------------------------------
@@ -183,7 +185,7 @@
         say(`discover: /${tab} … ${seen.size} items`);
         let page;
         try { page = await innertube("browse", { continuation: tokens[0] }); }
-        catch (e) { console.warn("aancha: discover continuation stopped", e); break; }
+        catch (e) { dwarn("discover continuation stopped", e); break; }
         const before = videos.length;
         parseLockups(page, kind, seen, videos);
         tokens = deepFind(page, "continuationCommand").map((c) => c.token).filter(Boolean);
@@ -318,7 +320,7 @@
     while (token && !window.AANCHA_STOP && guard++ < 100000) {
       let page;
       try { page = await innertube("next", { continuation: token }); }
-      catch (e) { console.warn("aancha: comments continuation stopped", e); break; }
+      catch (e) { dwarn("comments continuation stopped", e); break; }
       collectComments(page, null, seen, comments);
       for (const thread of deepFind(page, "commentThreadRenderer")) {
         const parentId = deepFind(thread, "commentId")[0] ||
@@ -336,7 +338,7 @@
       while (t && g2++ < 1000) {
         let page;
         try { page = await innertube("next", { continuation: t }); }
-        catch (e) { console.warn("aancha: reply continuation stopped", e); break; }
+        catch (e) { dwarn("reply continuation stopped", e); break; }
         collectComments(page, parentId, seen, comments);
         t = sectionNextToken(page);
       }
@@ -359,7 +361,7 @@
     while (cont && !window.AANCHA_STOP && guard++ < 200000) {
       let page;
       try { page = await innertube("live_chat/get_live_chat_replay", { continuation: cont }); }
-      catch (e) { console.warn("aancha: chat continuation stopped", e); break; }
+      catch (e) { dwarn("chat continuation stopped", e); break; }
       const lcc = deepFind(page, "liveChatContinuation")[0];
       if (!lcc) break;
       for (const action of lcc.actions || []) {
@@ -420,7 +422,7 @@
       }
       say(`finished: ${done} done, ${failed} failed. Safe to close.`);
     } catch (e) {
-      console.error("aancha collector stopped", e);
+      dwarn("collector stopped", e);
       say(`ERROR: ${String(e).slice(0, 300)}`);
     } finally {
       window.AANCHA_RUNNING = false;

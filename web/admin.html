@@ -709,7 +709,8 @@ function fillQueue(node, queue) {
 // this page; it is embedded into a draggable bookmarklet and a copyable console
 // snippet, each = config {server, token, pace_ms} + the /collector.js source.
 function buildCollectorCard() {
-  const bm = h("a", { class: "bm", href: "#" }, "⛏ aancha collect");
+  const brand = (STATE && STATE.brand) || "aancha";
+  const bm = h("a", { class: "bm", href: "#" }, "⛏ " + brand + " collect");
   const snippet = h("pre", { class: "snippet" }, "…");
   const copy = h("button", { class: "ghost" }, "Копировать сниппет");
   const note = h("span", { class: "muted", style: "font-size:.82rem" });
@@ -718,7 +719,7 @@ function buildCollectorCard() {
   async function build() {
     const t = currentToken;
     if (!t) { snippet.textContent = "не удалось получить токен"; bm.removeAttribute("href"); return; }
-    const cfgJson = JSON.stringify({ server: location.origin, token: t, pace_ms: 1500 });
+    const cfgJson = JSON.stringify({ server: location.origin, token: t, pace_ms: 1500, brand });
     let src;
     try { src = await api("/collector.js"); }
     catch (e) { note.textContent = "не удалось загрузить collector.js: " + e.message; return; }
@@ -751,7 +752,7 @@ function buildCollectorCard() {
     howto("Как собрать данные — по шагам",
       h("p", null, "«Коллектор» работает так: вы кладёте кнопку-закладку в браузер и нажимаете её на YouTube. Закладка — это сохранённая кнопка в браузере (обычно в строке под адресом сайта). Всё уже настроено — ключ подставляется сам."),
       h("ol", null,
-        h("li", null, "Перетащите зелёную кнопку «⛏ aancha collect» мышкой на панель закладок браузера (полоска со ссылками под адресной строкой)."),
+        h("li", null, "Перетащите зелёную кнопку «⛏ " + brand + " collect» мышкой на панель закладок браузера (полоска со ссылками под адресной строкой)."),
         h("li", null, "Откройте ", h("b", null, "youtube.com"), " и войдите в свой аккаунт."),
         h("li", null, "Нажмите на эту закладку. Внизу справа появится тёмное окошко."),
         h("li", null, "Подождите. Когда в окошке появится ", h("span", { class: "ok-note" }, "«готово»"), " — всё собралось, окошко можно закрыть.")),
