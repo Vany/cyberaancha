@@ -137,6 +137,7 @@ async fn serve(cfg: config::Config, config_path: PathBuf) -> Result<()> {
         cfg: cfg.clone(),
         config_path: Arc::new(config_path),
         basic_cache: Default::default(),
+        lockout: Default::default(),
         index,
     };
     let app = http::router(state);

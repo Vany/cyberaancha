@@ -38,13 +38,15 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [x] 12 tests incl. full harvest→integrate→reindex→answer + needs_transcription→transcribe→reintegrate
 - [x] prompts/integrate.md (v1) + PREP.md playbook (the Claude-session instructions)
 - [x] scripts/transcribe_pending.sh (yt-dlp audio → whisper.cpp; curl+jq, unattended, fail-loud)
-- [ ] install whisper-cpp + model on Mac; run full loop on a real harvested week; iterate prompt quality
+- [x] install whisper-cpp + model on Mac (large-v3-turbo-q5_0, 547M); verified whisper-cli JSON (offsets.from/to) matches the transcribe script's jq → valid schema
+- [ ] run full loop on a real harvested week; iterate prompt quality ← manual testing now
 - Note: extract+integrate collapsed into one `integrate` pass (MEMO); RU stemming imperfect → aliases carry inflections (research/)
 
 ## P5 — admin panel ✅
 - [x] SPA (web/admin.html, single file, vanilla, XSS-safe): Browse (search+detail+owner edit/delete), Questions, Test, Sources, System (clocks/queue, harvest/process, backups, collector launcher, MCP slot). Built by subagent per web/SPEC.md.
 - [x] lossless owner edit: get_article now returns full stances/facts/links (fixed subagent-flagged data-loss)
-- [ ] rate limiting + lockout — deferred (250ms auth brake exists; governor not yet added)
+- [x] owner help (C9) across all surfaces; collector walkthrough
+- [x] auth lockout: per-IP (nginx X-Real-IP), 8 fails/60s → 5 min cooldown, guards basic + bearer. (Global governor rate-limit skipped — low value for a single-admin tool behind auth.)
 
 ## P6 — MCP  ← MVP line ✅
 - [x] rmcp 2.2 streamable HTTP at /mcp, bearer(mcp); tools: search_articles, get_article, list_questions, answer_question, kb_stats. Verified live: initialize/tools-list/tools-call all work.

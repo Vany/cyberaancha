@@ -2,6 +2,13 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — finished all-but-TG; whisper ready; auth lockout
+
+- **Whisper**: installed whisper-cpp (brew, whisper-cli) + model ~/models/ggml-large-v3-turbo-q5_0.bin (547M, q5_0 quant of turbo). Verified whisper-cli `-oj` JSON = `transcription[].offsets.{from,to}` (ms) + `.text`, which the transcribe script's jq maps to the schema `{t_ms, d_ms, text}` — confirmed valid. Transcribe pipeline (yt-dlp→ffmpeg 16k mono→whisper→submit) ready for real videos.
+- **Auth lockout** (src/http/auth_mw.rs): per-IP (nginx X-Real-IP / XFF fallback), 8 failures/60s → 5-min cooldown, guards BOTH basic and bearer auth; cache hits + successes bypass/clear. Keyed on IP so an attacker can't lock out the legit user. `Fails` must be `pub` (exposed via `pub type Lockout`).
+- **Decisions**: skipped MCP resources (article://) — the 5 tools already cover the research surface, resources would duplicate get_article; skipped global governor rate-limit — low value for a single-admin tool. Both noted, not blocking.
+- Everything except Telegram (P8) is complete. Next: manual testing on @vanyserezhkin (harvest in Vany's browser → transcribe script → integrate Claude session → verify in panel/MCP).
+
 ## 2026-07-19 — MVP live end-to-end on youtube.serezhkin.com (HTTPS)
 
 - Full stack verified over HTTPS through nginx: panel /admin (200), /api/test-query hits via alias, and **MCP full handshake** (initialize→tools/list→tools/call). All 5 MCP tools work from a remote client.

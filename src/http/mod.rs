@@ -21,6 +21,7 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub config_path: Arc<PathBuf>,
     pub basic_cache: auth_mw::BasicCache,
+    pub lockout: auth_mw::Lockout,
     pub index: Arc<SearchIndex>,
 }
 
