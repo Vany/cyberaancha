@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "aancha": {
+      "type": "http",
+      "url": "https://youtube.serezhkin.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${AANCHA_MCP_TOKEN}"
+      }
+    }
+  }
+}
