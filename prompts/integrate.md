@@ -48,13 +48,18 @@ Signal ranking (authority, highest first):
 `spoken` (transcript) > `inferred` (from chat/other comments). Tag every stance/fact
 with the right `authority` and `source_kind`.
 
-## Step 4 — search before you create
+## Step 4 — search, then reconcile against EVERYTHING known
 
 For each topic, `GET /api/prep/search?q=<terms>` (try Russian term, colloquial term,
 and latin/EN name). Response `{ results: [ { slug, title, score } ] }`.
-- Strong match → **merge**: reuse that `slug`, `GET /api/articles/{slug}` to read the
-  current article, and send it back **augmented** (keep existing aliases/stances/facts,
-  add the new ones). Never drop what's there.
+- Strong match → **merge**: `GET /api/articles/{slug}` and read **everything already
+  known about that topic** — all stances, all facts, the whole opinion timeline.
+  **Compare the new material against that entire picture**: does it agree, add nuance,
+  or contradict? Reconcile it — don't just append. Place each new statement in the
+  dated timeline (keep older stances even when a newer one revises them — that is how
+  "переосмыслено в …" is reconstructed), and update `paragraph_ru` to the latest
+  reconciled opinion. If two sources genuinely conflict and you can't resolve it, add
+  a `contradicts` link and raise a question. Never drop existing aliases/stances/facts.
 - No good match → **create**: mint a new slug (short, `[a-z0-9-]`, transliterated —
   e.g. `melatonin`, `zhelezo-deficit`).
 - Two existing articles are clearly the same topic → merge them: write the survivor
