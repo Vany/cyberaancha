@@ -24,7 +24,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, tool, tool_handler,
 const INTEGRATE_PROMPT: &str = r#"You are the preparer for the aancha knowledge base — you turn ONE harvested video into curated KB articles. This runs at build time; the production server has no LLM, so the quality of what you write here IS the quality of every future answer.
 
 Iron rules:
-- Quote and attribute; NEVER synthesize medical advice. You record what the author said, with sources. When unsure, raise a question instead of guessing.
+- Quote and attribute; You record what the author said, with sources. When unsure, raise a question instead of guessing.
 - Store article text in the source language (Russian).
 - One video at a time (serialized). Always search the KB before creating.
 
@@ -90,11 +90,21 @@ fn oops(e: anyhow::Error) -> McpError {
 #[tool_router]
 impl AanchaMcp {
     pub fn new(db: Db, index: Arc<SearchIndex>, owner_name: String) -> Self {
-        Self { db, index, owner_name, tool_router: Self::tool_router() }
+        Self {
+            db,
+            index,
+            owner_name,
+            tool_router: Self::tool_router(),
+        }
     }
 
-    #[tool(description = "Full-text search Prof. Baranova's knowledge base. Returns matching article slugs, titles, and BM25 scores.")]
-    async fn search_articles(&self, Parameters(p): Parameters<SearchParams>) -> Result<String, McpError> {
+    #[tool(
+        description = "Full-text search Prof. Baranova's knowledge base. Returns matching article slugs, titles, and BM25 scores."
+    )]
+    async fn search_articles(
+        &self,
+        Parameters(p): Parameters<SearchParams>,
+    ) -> Result<String, McpError> {
         let hits = self.index.search(&p.query, 20).map_err(oops)?;
         let out = self
             .db
@@ -102,7 +112,11 @@ impl AanchaMcp {
                 let mut results = vec![];
                 for h in hits {
                     let title: Option<String> = c
-                        .query_row("SELECT title FROM articles WHERE slug = ?1", [&h.slug], |r| r.get(0))
+                        .query_row(
+                            "SELECT title FROM articles WHERE slug = ?1",
+                            [&h.slug],
+                            |r| r.get(0),
+                        )
                         .ok();
                     results.push(json!({ "slug": h.slug, "title": title, "score": h.score }));
                 }
@@ -113,17 +127,28 @@ impl AanchaMcp {
         Ok(out.to_string())
     }
 
-    #[tool(description = "Get one full article by slug: title, paragraph, story, aliases, stances/citations, facts, and links.")]
+    #[tool(
+        description = "Get one full article by slug: title, paragraph, story, aliases, stances/citations, facts, and links."
+    )]
     async fn get_article(&self, Parameters(p): Parameters<SlugParams>) -> Result<String, McpError> {
         let slug = p.slug.clone();
-        let article = self.db.call(move |c| kb::get_article(c, &slug)).await.map_err(oops)?;
+        let article = self
+            .db
+            .call(move |c| kb::get_article(c, &slug))
+            .await
+            .map_err(oops)?;
         match article {
             Some(a) => Ok(serde_json::to_string(&a).map_err(|e| oops(e.into()))?),
-            None => Err(McpError::resource_not_found(format!("no article {:?}", p.slug), None)),
+            None => Err(McpError::resource_not_found(
+                format!("no article {:?}", p.slug),
+                None,
+            )),
         }
     }
 
-    #[tool(description = "List the open questions awaiting the professor's answer (contradictions and gaps found during integration).")]
+    #[tool(
+        description = "List the open questions awaiting the professor's answer (contradictions and gaps found during integration)."
+    )]
     async fn list_questions(&self) -> Result<String, McpError> {
         let out = self
             .db
@@ -150,8 +175,13 @@ impl AanchaMcp {
         Ok(out.to_string())
     }
 
-    #[tool(description = "Answer an open question by id. Records the professor's answer as an authoritative fact for the next integration cycle.")]
-    async fn answer_question(&self, Parameters(p): Parameters<AnswerParams>) -> Result<String, McpError> {
+    #[tool(
+        description = "Answer an open question by id. Records the professor's answer as an authoritative fact for the next integration cycle."
+    )]
+    async fn answer_question(
+        &self,
+        Parameters(p): Parameters<AnswerParams>,
+    ) -> Result<String, McpError> {
         if p.answer.trim().is_empty() {
             return Err(McpError::invalid_params("empty answer", None));
         }
@@ -168,12 +198,17 @@ impl AanchaMcp {
             .await
             .map_err(oops)?;
         if n == 0 {
-            return Err(McpError::resource_not_found(format!("no open question {id}"), None));
+            return Err(McpError::resource_not_found(
+                format!("no open question {id}"),
+                None,
+            ));
         }
         Ok(json!({ "answered": id }).to_string())
     }
 
-    #[tool(description = "Knowledge-base statistics: counts of articles, videos, transcripts, comments, and the last gathered/processed timestamps.")]
+    #[tool(
+        description = "Knowledge-base statistics: counts of articles, videos, transcripts, comments, and the last gathered/processed timestamps."
+    )]
     async fn kb_stats(&self) -> Result<String, McpError> {
         let out = self
             .db
@@ -200,7 +235,9 @@ impl AanchaMcp {
         Ok(out.to_string())
     }
 
-    #[tool(description = "Claim the next un-integrated video and return its full bundle: metadata, transcript (segments with t_ms timestamps), comments (professor's replies flagged is_author), and her chat messages. Categorize it into KB articles, then call submit_articles. Returns {\"done\":true} when none remain. Serialized — one active at a time. Follow the 'integrate' MCP prompt for the method.")]
+    #[tool(
+        description = "Claim the next un-integrated video and return its full bundle: metadata, transcript (segments with t_ms timestamps), comments (professor's replies flagged is_author), and her chat messages. Categorize it into KB articles, then call submit_articles. Returns {\"done\":true} when none remain. Serialized — one active at a time. Follow the 'integrate' MCP prompt for the method."
+    )]
     async fn next_unprocessed_video(&self) -> Result<String, McpError> {
         let out = self
             .db
@@ -222,10 +259,16 @@ impl AanchaMcp {
         }
     }
 
-    #[tool(description = "Submit the articles you extracted for a claimed video. task_id from next_unprocessed_video; result_json is the integrate envelope {\"articles\":[...],\"questions\":[...]} (or {\"needs_transcription\":true,\"articles\":[]} if the transcript is unusable). Upserts articles, files questions, marks the video processed, and rebuilds the search index.")]
-    async fn submit_articles(&self, Parameters(p): Parameters<SubmitParams>) -> Result<String, McpError> {
-        let result: Value = serde_json::from_str(&p.result_json)
-            .map_err(|e| McpError::invalid_params(format!("result_json is not valid JSON: {e}"), None))?;
+    #[tool(
+        description = "Submit the articles you extracted for a claimed video. task_id from next_unprocessed_video; result_json is the integrate envelope {\"articles\":[...],\"questions\":[...]} (or {\"needs_transcription\":true,\"articles\":[]} if the transcript is unusable). Upserts articles, files questions, marks the video processed, and rebuilds the search index."
+    )]
+    async fn submit_articles(
+        &self,
+        Parameters(p): Parameters<SubmitParams>,
+    ) -> Result<String, McpError> {
+        let result: Value = serde_json::from_str(&p.result_json).map_err(|e| {
+            McpError::invalid_params(format!("result_json is not valid JSON: {e}"), None)
+        })?;
         let task_id = p.task_id;
         let outcome = self
             .db
@@ -250,7 +293,10 @@ impl ServerHandler for AanchaMcp {
         // ServerInfo is #[non_exhaustive] — build from default, then set fields.
         let mut info = ServerInfo::default();
         info.protocol_version = ProtocolVersion::LATEST;
-        info.capabilities = ServerCapabilities::builder().enable_tools().enable_prompts().build();
+        info.capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_prompts()
+            .build();
         info.server_info = Implementation::from_build_env();
         info.server_info.name = "aancha".into();
         info.server_info.version = env!("CARGO_PKG_VERSION").into();
@@ -272,7 +318,9 @@ impl ServerHandler for AanchaMcp {
     ) -> Result<ListPromptsResult, McpError> {
         Ok(ListPromptsResult::with_all_items(vec![Prompt::new(
             "integrate",
-            Some("Turn one harvested video into curated KB articles — the preparer loop (next_unprocessed_video → categorize/reconcile → submit_articles)."),
+            Some(
+                "Turn one harvested video into curated KB articles — the preparer loop (next_unprocessed_video → categorize/reconcile → submit_articles).",
+            ),
             None,
         )]))
     }
@@ -287,7 +335,10 @@ impl ServerHandler for AanchaMcp {
                 Role::User,
                 INTEGRATE_PROMPT,
             )])),
-            other => Err(McpError::invalid_params(format!("unknown prompt {other:?}"), None)),
+            other => Err(McpError::invalid_params(
+                format!("unknown prompt {other:?}"),
+                None,
+            )),
         }
     }
 }
@@ -304,15 +355,20 @@ pub fn service(
     public_host: Option<String>,
     owner_name: String,
 ) -> StreamableHttpService<AanchaMcp, LocalSessionManager> {
-    let mut allowed_hosts: Vec<String> =
-        vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
+    let mut allowed_hosts: Vec<String> = vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
     if let Some(host) = public_host {
         allowed_hosts.push(host);
     }
     // Config is #[non_exhaustive] — use the builder method, not a struct literal.
     let config = StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts);
     StreamableHttpService::new(
-        move || Ok(AanchaMcp::new(db.clone(), index.clone(), owner_name.clone())),
+        move || {
+            Ok(AanchaMcp::new(
+                db.clone(),
+                index.clone(),
+                owner_name.clone(),
+            ))
+        },
         Arc::new(LocalSessionManager::default()),
         config,
     )
