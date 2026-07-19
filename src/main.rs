@@ -8,6 +8,7 @@ mod db;
 mod http;
 mod index;
 mod kb;
+mod mcp;
 mod queue;
 mod raw;
 

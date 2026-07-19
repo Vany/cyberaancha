@@ -42,7 +42,8 @@ pub fn router(state: AppState) -> axum::Router {
         .route("/api/process/enqueue", post(api::process_enqueue))
         .route("/api/test-query", post(api::test_query))
         .route("/api/articles", get(api::articles_search))
-        .route("/api/articles/{slug}", get(api::article_get).put(api::article_put))
+        .route("/api/articles/{slug}", get(api::article_get).put(api::article_put).delete(api::article_delete))
+        .route("/api/videos", get(api::videos_list))
         .route("/api/questions", get(api::questions_list))
         .route("/api/questions/{id}/answer", post(api::question_answer))
         .route("/admin", get(admin_page))
@@ -97,6 +98,12 @@ pub fn router(state: AppState) -> axum::Router {
             HeaderValue::from_static("true"),
         ));
 
+    // MCP over streamable HTTP at /mcp, bearer-gated (mcp token). rmcp's service
+    // is a tower Service nested here; the middleware guards it.
+    let mcp = axum::Router::new()
+        .nest_service("/mcp", crate::mcp::service(state.db.clone(), state.index.clone()))
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth_mw::mcp_auth));
+
     axum::Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/", get(|| async { axum::response::Redirect::temporary("/admin") }))
@@ -104,6 +111,7 @@ pub fn router(state: AppState) -> axum::Router {
         .merge(panel)
         .merge(prep_api)
         .merge(collector_api)
+        .merge(mcp)
         .with_state(state)
 }
 

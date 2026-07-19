@@ -278,6 +278,67 @@ pub async fn article_put(
     }
 }
 
+/// Owner/admin: delete an article (child rows cascade), then reindex.
+pub async fn article_delete(
+    State(st): State<AppState>,
+    Extension(role): Extension<Role>,
+    Path(slug): Path<String>,
+) -> Response {
+    if role != Role::Owner && role != Role::Admin {
+        return (StatusCode::FORBIDDEN, "owner or admin only").into_response();
+    }
+    let result = st
+        .db
+        .call(move |c| {
+            let n = c.execute("DELETE FROM articles WHERE slug = ?1", [&slug])?;
+            Ok(n)
+        })
+        .await;
+    match result {
+        Ok(0) => (StatusCode::NOT_FOUND, "no such article").into_response(),
+        Ok(_) => match super::reindex(&st).await {
+            Ok(_) => StatusCode::NO_CONTENT.into_response(),
+            Err(e) => internal(e),
+        },
+        Err(e) => internal(e),
+    }
+}
+
+/// Sources tab: video inventory with per-stage harvest/process status.
+pub async fn videos_list(State(st): State<AppState>) -> Response {
+    let result = st
+        .db
+        .call(|c| {
+            let mut stmt = c.prepare(
+                "SELECT yt_id, kind, title, approx_published, published_at, duration_s,
+                        meta_done, captions_state, comments_state, chat_state, integrated
+                 FROM videos ORDER BY COALESCE(published_at, approx_published) DESC LIMIT 1000",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(json!({
+                        "yt_id": r.get::<_, String>(0)?,
+                        "kind": r.get::<_, String>(1)?,
+                        "title": r.get::<_, String>(2)?,
+                        "published": r.get::<_, Option<String>>(4)?.or(r.get::<_, Option<String>>(3)?),
+                        "duration_s": r.get::<_, Option<i64>>(5)?,
+                        "meta_done": r.get::<_, i64>(6)? == 1,
+                        "captions": r.get::<_, String>(7)?,
+                        "comments": r.get::<_, String>(8)?,
+                        "chat": r.get::<_, String>(9)?,
+                        "integrated": r.get::<_, i64>(10)? == 1,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(Value::Array(rows))
+        })
+        .await;
+    match result {
+        Ok(videos) => axum::Json(json!({ "videos": videos })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
 pub async fn questions_list(State(st): State<AppState>) -> Response {
     let result = st
         .db

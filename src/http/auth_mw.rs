@@ -123,6 +123,11 @@ pub async fn preparer_auth(state: State<AppState>, req: Request, next: Next) -> 
     check_bearer(state, req, next, "preparer").await
 }
 
+/// Bearer auth for the MCP endpoint (her Claude / ours). Token = `mcp` purpose.
+pub async fn mcp_auth(state: State<AppState>, req: Request, next: Next) -> Response {
+    check_bearer(state, req, next, "mcp").await
+}
+
 async fn check_bearer(
     State(st): State<AppState>,
     req: Request,

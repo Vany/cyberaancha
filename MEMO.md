@@ -2,6 +2,12 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — P5 panel + P6 MCP: MVP line reached
+
+- **P5 panel** (`web/admin.html`, built by a subagent per `web/SPEC.md`): single self-contained vanilla-JS file, XSS-safe via a text-node DOM builder. Tabs: Browse (search + article detail + owner edit/delete), Questions (answer), Test (verbatim bot answer), Sources (video inventory + status chips), System (admin-only: clocks/watermarks/queue, harvest+process buttons, backups, collector launcher, MCP slot). Subagent caught a real bug: `get_article` returned only `citations`, so owner edits would wipe facts/links → **fixed**: ArticleView now returns full stances/facts/links, panel re-sends them verbatim (lossless).
+- **P6 MCP** (`src/mcp.rs`): rmcp 2.2 streamable HTTP at `/mcp`, bearer(mcp)-gated. Tools: search_articles, get_article, list_questions, answer_question, kb_stats — return JSON strings. **Verified live**: initialize → tools/list (all 5) → tools/call search_articles finds article via alias, kb_stats returns counts. rmcp notes: `ServerInfo` is #[non_exhaustive] (build from default + set fields); `tool_router` field triggers a false dead-code warning (macro reads it — suppressed); server_info name set explicitly ("aancha"). schemars 1 added for tool param schemas.
+- Deferred: MCP resources (article://) + search_transcripts (no transcript index yet); rate-limit/governor (250ms auth brake stands).
+
 ## 2026-07-19 — P4 built: KB + tantivy + answer engine + preparer pipeline
 
 - `src/kb` (articles/aliases/stances/facts/links/questions, upsert + tx variant + reads), `src/index` (tantivy 0.26, RU Snowball, delete-all+refill rebuild atomic at commit, boosts), `src/answer` (query→search→templated RU reply, ≤5 links newest-first, disclaimer, honest miss + `queries` log), `src/queue/prep` (serialized integrate with full video bundle, transcribe worker). Migrations 004 (KB) + 005 (integrated/transcribe_state flags).

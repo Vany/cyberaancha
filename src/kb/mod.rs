@@ -184,6 +184,9 @@ pub fn citations(conn: &Connection, slug: &str) -> Result<Vec<Citation>> {
     Ok(out)
 }
 
+/// Full article, enough to render AND to round-trip an owner edit without loss.
+/// `citations` is a display projection of `stances`; the panel edits and
+/// re-sends `stances`/`facts`/`links` verbatim (upsert replaces children).
 #[derive(Debug, Serialize)]
 pub struct ArticleView {
     pub slug: String,
@@ -193,6 +196,9 @@ pub struct ArticleView {
     pub status: String,
     pub aliases: Vec<String>,
     pub citations: Vec<Citation>,
+    pub stances: Vec<Stance>,
+    pub facts: Vec<Fact>,
+    pub links: Vec<Link>,
 }
 
 pub fn get_article(conn: &Connection, slug: &str) -> Result<Option<ArticleView>> {
@@ -218,6 +224,47 @@ pub fn get_article(conn: &Connection, slug: &str) -> Result<Option<ArticleView>>
     let aliases = stmt
         .query_map([&slug], |r| r.get(0))?
         .collect::<std::result::Result<_, _>>()?;
+
+    let mut sstmt = conn.prepare(
+        "SELECT text, video_id, offset_ms, source_kind, source_ref, authority, occurred_at
+         FROM stances WHERE article_slug = ?1 ORDER BY id",
+    )?;
+    let stances = sstmt
+        .query_map([&slug], |r| {
+            Ok(Stance {
+                text: r.get(0)?,
+                video_id: r.get(1)?,
+                offset_ms: r.get(2)?,
+                source_kind: r.get(3)?,
+                source_ref: r.get(4)?,
+                authority: r.get(5)?,
+                occurred_at: r.get(6)?,
+            })
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut fstmt = conn.prepare(
+        "SELECT text, source_kind, source_ref, authority, confidence FROM facts
+         WHERE article_slug = ?1 ORDER BY id",
+    )?;
+    let facts = fstmt
+        .query_map([&slug], |r| {
+            Ok(Fact {
+                text: r.get(0)?,
+                source_kind: r.get(1)?,
+                source_ref: r.get(2)?,
+                authority: r.get(3)?,
+                confidence: r.get(4)?,
+            })
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut lstmt =
+        conn.prepare("SELECT to_slug, kind FROM article_links WHERE from_slug = ?1 ORDER BY to_slug")?;
+    let links = lstmt
+        .query_map([&slug], |r| Ok(Link { to_slug: r.get(0)?, kind: r.get(1)? }))?
+        .collect::<std::result::Result<_, _>>()?;
+
     Ok(Some(ArticleView {
         citations: citations(conn, &slug)?,
         slug,
@@ -226,6 +273,9 @@ pub fn get_article(conn: &Connection, slug: &str) -> Result<Option<ArticleView>>
         story_md,
         status,
         aliases,
+        stances,
+        facts,
+        links,
     }))
 }
 

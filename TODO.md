@@ -41,13 +41,15 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [ ] install whisper-cpp + model on Mac; run full loop on a real harvested week; iterate prompt quality
 - Note: extract+integrate collapsed into one `integrate` pass (MEMO); RU stemming imperfect → aliases carry inflections (research/)
 
-## P5 — admin panel
-- [ ] SPA shell, auth, tabs: Search/Browse, Article (view/edit), Questions, Test, Sources, System (clocks, queue, collector launcher, MCP info, backups)
-- [ ] rate limiting + lockout
+## P5 — admin panel ✅
+- [x] SPA (web/admin.html, single file, vanilla, XSS-safe): Browse (search+detail+owner edit/delete), Questions, Test, Sources, System (clocks/queue, harvest/process, backups, collector launcher, MCP slot). Built by subagent per web/SPEC.md.
+- [x] lossless owner edit: get_article now returns full stances/facts/links (fixed subagent-flagged data-loss)
+- [ ] rate limiting + lockout — deferred (250ms auth brake exists; governor not yet added)
 
-## P6 — MCP  ← MVP line
-- [ ] rmcp streamable HTTP at /mcp, bearer; tools: search_articles, get_article, search_transcripts, get_video, list_questions, answer_question, next_task, submit_result, kb_stats; resources article:// video:// person://
-- [ ] token + URL surfaced in System tab
+## P6 — MCP  ← MVP line ✅
+- [x] rmcp 2.2 streamable HTTP at /mcp, bearer(mcp); tools: search_articles, get_article, list_questions, answer_question, kb_stats. Verified live: initialize/tools-list/tools-call all work.
+- [x] MCP URL in System tab (token via `gen-token mcp`, shown once by CLI — server stores only the hash)
+- Note: resources (article://) + search_transcripts deferred (no transcript index yet); tools cover the MVP research surface.
 
 ## P7 — production backfill (Ancha)
 - [ ] disk decision on n1 (volume/resize/prune policy)

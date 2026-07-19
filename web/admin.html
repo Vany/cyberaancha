@@ -1,82 +1,692 @@
 <!doctype html>
-<!-- Minimal P2 admin: state view, wave control, collector launcher.
-     The real SPA shell replaces this in P5. -->
-<html lang="en">
+<!-- aancha admin panel (P5): Browse / Questions / Test / Sources / System.
+     Single self-contained file — inline CSS + vanilla JS, no build, no CDN,
+     no framework. Embedded via include_str! and served at GET /admin.
+     It talks only to this server's REST API (iron rule: no LLM, no external
+     network at runtime). The browser attaches Basic-auth credentials to every
+     fetch automatically; the panel never handles the panel password. -->
+<html lang="ru">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aancha admin</title>
+<!-- Empty inline icon: stops the browser requesting /favicon.ico (which the
+     server 404s), keeping the console clean and adding no external asset. -->
+<link rel="icon" href="data:,">
+<title>aancha — admin</title>
 <style>
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 780px; margin: 2rem auto; padding: 0 1rem; background: #fafafa; color: #222; }
-  h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 1.6rem; }
-  pre { background: #14161a; color: #cde; padding: .8rem; border-radius: 8px; overflow: auto; font-size: 12px; }
-  button { padding: .4rem .9rem; border: 0; border-radius: 6px; background: #2a6df4; color: #fff; cursor: pointer; margin-right: .5rem; }
-  button.warn { background: #b23; }
-  input[type=password], input[type=text] { width: 100%; padding: .4rem; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; }
-  textarea { width: 100%; height: 90px; font: 11px monospace; }
-  a.bm { display: inline-block; padding: .4rem .9rem; background: #2a8f4a; color: #fff; border-radius: 6px; text-decoration: none; }
-  .note { color: #666; font-size: 12px; }
+  :root {
+    --fg: #1b1d20; --muted: #6b7178; --line: #e2e5e9; --bg: #f6f7f9;
+    --card: #fff; --accent: #2a6df4; --accent-ink: #fff;
+    --green-bg: #e4f6ea; --green-fg: #14733a; --green-line: #a9e2bd;
+    --amber-bg: #fff3df; --amber-fg: #8a5600; --amber-line: #f0d29a;
+    --grey-bg: #eceef1; --grey-fg: #6b7178; --grey-line: #dcdfe4;
+    --danger: #b3261e; --danger-bg: #fdecea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg); background: var(--bg); margin: 0;
+  }
+  header {
+    display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap;
+    padding: .9rem 1.2rem; background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  header .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: .02em; }
+  header .meta { color: var(--muted); font-size: .85rem; display: flex; gap: .5rem; flex-wrap: wrap; }
+  header .meta .role { color: var(--accent); font-weight: 600; }
+  nav { display: flex; gap: .25rem; padding: 0 1.2rem; background: var(--card); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  nav a {
+    padding: .6rem .85rem; color: var(--muted); text-decoration: none; font-weight: 600;
+    font-size: .92rem; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  nav a:hover { color: var(--fg); }
+  nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+  main { max-width: 1000px; margin: 1.3rem auto; padding: 0 1.2rem 3rem; }
+  h2 { font-size: 1.15rem; margin: 0 0 .8rem; }
+  h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+  h4 { font-size: .98rem; margin: 1rem 0 .4rem; }
+  h5 { font-size: .9rem; margin: .8rem 0 .3rem; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  a { color: var(--accent); }
+  button {
+    font: inherit; padding: .45rem .95rem; border: 1px solid var(--accent); border-radius: 7px;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer;
+  }
+  button.ghost { background: var(--card); color: var(--accent); }
+  button.warn { background: var(--danger); border-color: var(--danger); }
+  button:disabled { opacity: .55; cursor: default; }
+  button + button { margin-left: .5rem; }
+  input[type=text], input[type=search], input[type=password], textarea, select {
+    font: inherit; width: 100%; padding: .5rem .6rem; border: 1px solid #c5cad0;
+    border-radius: 7px; background: #fff; color: var(--fg);
+  }
+  textarea { resize: vertical; min-height: 4.5rem; }
+  label { display: block; font-size: .85rem; font-weight: 600; color: var(--muted); margin: .7rem 0 .25rem; }
+  .row { display: flex; gap: .6rem; align-items: center; }
+  .row > input { flex: 1; }
+  .chip {
+    display: inline-block; font-size: .78rem; padding: .12rem .5rem; border-radius: 999px;
+    background: var(--grey-bg); color: var(--grey-fg); border: 1px solid var(--grey-line); margin: .15rem .25rem .15rem 0;
+  }
+  .chip.link { cursor: pointer; }
+  .chip.green { background: var(--green-bg); color: var(--green-fg); border-color: var(--green-line); }
+  .chip.amber { background: var(--amber-bg); color: var(--amber-fg); border-color: var(--amber-line); }
+  .chip.grey  { background: var(--grey-bg);  color: var(--grey-fg);  border-color: var(--grey-line); }
+  .result { padding: .55rem .2rem; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; }
+  .result:hover { background: #f0f4ff; }
+  .result .score { color: var(--muted); font-variant-numeric: tabular-nums; font-size: .85rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .55rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .82rem; }
+  tbody tr:hover { background: #f9fafc; }
+  pre.answer {
+    background: #14161a; color: #dbe7ff; padding: .9rem 1rem; border-radius: 9px;
+    white-space: pre-wrap; word-break: break-word; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; margin: 0;
+  }
+  pre.snippet { background: #14161a; color: #cde; padding: .7rem; border-radius: 8px; font: 11px/1.4 ui-monospace, monospace; white-space: pre; overflow: auto; max-height: 8rem; }
+  .cite { padding: .5rem 0; border-bottom: 1px dashed var(--line); }
+  .cite .head { font-size: .8rem; color: var(--muted); margin-bottom: .15rem; }
+  .badge { display: inline-block; font-size: .78rem; font-weight: 600; padding: .1rem .5rem; border-radius: 6px; }
+  .badge.published { background: var(--green-bg); color: var(--green-fg); }
+  .badge.draft { background: var(--grey-bg); color: var(--grey-fg); }
+  .error { background: var(--danger-bg); color: var(--danger); border: 1px solid #f3c7c3; border-radius: 8px; padding: .6rem .8rem; margin: .6rem 0; white-space: pre-wrap; }
+  .empty { color: var(--muted); padding: 1.2rem 0; }
+  .bm { display: inline-block; padding: .45rem .95rem; background: #2a8f4a; color: #fff; border-radius: 7px; text-decoration: none; font-weight: 600; }
+  .story h3, .story h4, .story h5 { margin: .7rem 0 .3rem; }
+  .story p { margin: .4rem 0; }
+  .story ul { margin: .3rem 0 .3rem 1.2rem; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: .2rem .9rem; font-size: .92rem; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .actions-out { margin-top: .6rem; }
 </style>
-
-<h1>aancha — admin (P2 minimal)</h1>
-
-<h2>State</h2>
-<pre id="state">loading…</pre>
-<button onclick="loadState()">refresh</button>
-
-<h2>Harvest wave</h2>
-<button onclick="enqueue('back')">gather older week</button>
-<button onclick="enqueue('forward')">gather new since watermark</button>
-<span id="waveMsg" class="note"></span>
-
-<h2>Collector launcher</h2>
-<p class="note">Paste the collector token (from <code>gen-token collector</code>). It stays in this page only.</p>
-<input type="password" id="token" placeholder="aancha-collector-…" oninput="buildLaunchers()">
-<p>
-  <a class="bm" id="bookmarklet" href="#">⛏ aancha collect</a>
-  <span class="note">← drag to bookmarks bar, then click it on any youtube.com page. If YouTube's CSP blocks it, use the snippet:</span>
-</p>
-<textarea id="snippet" readonly placeholder="snippet appears when token is set"></textarea>
-<button onclick="copySnippet()">copy snippet</button>
-<span class="note">Open youtube.com → DevTools console → paste → Enter.</span>
+</head>
+<body>
+<header>
+  <span class="brand">aancha</span>
+  <span id="meta" class="meta"></span>
+</header>
+<nav id="nav"></nav>
+<main id="view"><div class="empty">Загрузка…</div></main>
 
 <script>
-const j = (r) => { if (!r.ok) throw new Error(r.status); return r.json(); };
+"use strict";
 
-async function loadState() {
+// ---- tiny DOM builder -------------------------------------------------------
+// Children that are strings become text nodes, so anything server-provided is
+// escaped by construction — we never feed KB content through innerHTML (XSS).
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
+    else if (k in e) e[k] = v;
+    else e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return e;
+}
+const $ = (id) => document.getElementById(id);
+const clear = (node) => node.replaceChildren();
+
+// ---- API wrapper ------------------------------------------------------------
+// Fails visibly: non-2xx throws Error(status + body) so callers can surface it
+// inline. 204 → null. Credentials ride along automatically (same-origin Basic).
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let body = "";
+    try { body = (await res.text()).trim(); } catch {}
+    const err = new Error(`HTTP ${res.status}${body ? " — " + body : ""}`);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("json") ? res.json() : res.text();
+}
+const postJson = (path, obj) =>
+  api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(obj) });
+
+// ---- formatting helpers -----------------------------------------------------
+function fmtTs(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return isNaN(d) ? String(s) : d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+const fmtDate = (s) => (s ? String(s).slice(0, 10) : "—");
+function fmtDur(sec) {
+  if (sec == null) return "—";
+  sec = +sec;
+  const hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60);
+  return hh + ":" + String(mm).padStart(2, "0");
+}
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+function errorBox(e) { return h("div", { class: "error" }, "Ошибка: " + (e && e.message ? e.message : e)); }
+// Disable a button for the duration of its async action (spec: no double-submit).
+async function withBusy(btn, fn) {
+  btn.disabled = true;
+  try { return await fn(); } finally { btn.disabled = false; }
+}
+// Status-chip colour per spec: have/done/true → green, pending → amber, none/na/false → grey.
+function stateChip(label, value) {
+  let cls = "grey";
+  if (value === true || value === "have" || value === "done") cls = "green";
+  else if (value === "pending" || value === false) cls = "amber"; // false = outstanding work
+  return h("span", { class: "chip " + cls }, label);
+}
+
+// ---- app state + routing ----------------------------------------------------
+let STATE = null;                 // last /api/state (role, channel, version, clocks, queue…)
+let sysPollTimer = null;          // System-tab heartbeat
+let lastBrowseQuery = "";         // survive nav so returning from an article keeps results
+
+const TABS = [
+  ["browse", "Обзор"],
+  ["questions", "Вопросы"],
+  ["test", "Тест"],
+  ["sources", "Источники"],
+  ["system", "Система"],          // admin only — filtered out for owner
+];
+const isAdmin = () => STATE && STATE.role === "admin";
+
+function stopSysPoll() { if (sysPollTimer) { clearInterval(sysPollTimer); sysPollTimer = null; } }
+
+function renderHeader() {
+  const m = $("meta");
+  clear(m);
+  if (!STATE) return;
+  m.append(
+    h("span", null, STATE.channel || "—"),
+    h("span", null, "·"),
+    h("span", null, "v" + (STATE.version || "?")),
+    h("span", null, "·"),
+    h("span", { class: "role" }, STATE.role || "?"),
+  );
+}
+
+function renderNav(activeTab) {
+  const nav = $("nav");
+  clear(nav);
+  for (const [id, label] of TABS) {
+    if (id === "system" && !isAdmin()) continue; // hide ops surface from owner
+    nav.append(h("a", { href: "#" + id, class: id === activeTab ? "active" : "" }, label));
+  }
+}
+
+function parseHash() {
+  const raw = (location.hash || "#browse").replace(/^#/, "");
+  const [tab, ...rest] = raw.split("/");
+  return { tab: tab || "browse", arg: rest.join("/") };
+}
+
+function route() {
+  stopSysPoll();
+  const { tab, arg } = parseHash();
+  const known = TABS.some(([id]) => id === tab);
+  const active = known ? tab : "browse";
+  renderNav(active);
+  const view = $("view");
+  clear(view);
   try {
-    document.getElementById("state").textContent =
-      JSON.stringify(await fetch("/api/state").then(j), null, 2);
-  } catch (e) { document.getElementById("state").textContent = "error: " + e; }
+    if (active === "browse") renderBrowse(view, arg);
+    else if (active === "questions") renderQuestions(view);
+    else if (active === "test") renderTest(view);
+    else if (active === "sources") renderSources(view);
+    else if (active === "system") renderSystem(view);
+  } catch (e) {
+    view.append(errorBox(e));
+  }
 }
 
-async function enqueue(direction) {
-  const el = document.getElementById("waveMsg");
+// ---- Browse -----------------------------------------------------------------
+function renderBrowse(view, slug) {
+  if (slug) return renderArticle(view, slug);
+
+  view.append(h("h2", null, "Обзор базы знаний"));
+  const input = h("input", {
+    type: "search", name: "q", placeholder: "Поиск: тема, синоним, вопрос…", value: lastBrowseQuery, autocomplete: "off",
+  });
+  const results = h("div");
+  view.append(h("div", { class: "card" }, input), results);
+
+  async function run() {
+    const q = input.value.trim();
+    lastBrowseQuery = q;
+    clear(results);
+    if (!q) { results.append(h("div", { class: "empty" }, "Введите запрос для поиска.")); return; }
+    results.append(h("div", { class: "empty" }, "Поиск…"));
+    try {
+      const { results: hits } = await api("/api/articles?q=" + encodeURIComponent(q));
+      clear(results);
+      if (!hits.length) { results.append(h("div", { class: "empty" }, "Ничего не найдено.")); return; }
+      for (const r of hits) {
+        results.append(h("div", { class: "result", onclick: () => { location.hash = "#browse/" + r.slug; } },
+          h("span", null, r.title || r.slug),
+          h("span", { class: "score" }, (typeof r.score === "number" ? r.score.toFixed(2) : "") + "  " + r.slug),
+        ));
+      }
+    } catch (e) { clear(results); results.append(errorBox(e)); }
+  }
+  const deb = debounce(run, 250);
+  input.addEventListener("input", deb);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+  input.focus();
+  if (lastBrowseQuery) run(); // restore results when coming back from a detail view
+}
+
+async function renderArticle(view, slug) {
+  view.append(h("a", { href: "#browse" }, "← к поиску"));
+  const box = h("div");
+  view.append(box);
+  box.append(h("div", { class: "empty" }, "Загрузка статьи…"));
+  let art;
   try {
-    const res = await fetch("/api/harvest/enqueue?direction=" + direction, { method: "POST" }).then(j);
-    el.textContent = JSON.stringify(res);
-    loadState();
-  } catch (e) { el.textContent = "error: " + e; }
+    art = await api("/api/articles/" + encodeURIComponent(slug));
+  } catch (e) {
+    clear(box);
+    box.append(e.status === 404 ? h("div", { class: "empty" }, "Статья не найдена.") : errorBox(e));
+    return;
+  }
+  clear(box);
+
+  const header = h("h2", null, art.title || art.slug, " ",
+    h("span", { class: "badge " + (art.status === "published" ? "published" : "draft") }, art.status || "draft"));
+  box.append(header);
+
+  if (art.paragraph_ru) box.append(h("p", null, art.paragraph_ru));
+
+  if (art.aliases && art.aliases.length) {
+    const chips = h("div");
+    for (const a of art.aliases) chips.append(h("span", { class: "chip" }, a));
+    box.append(h("h5", null, "Синонимы"), chips);
+  }
+
+  if (art.story_md && art.story_md.trim()) {
+    box.append(h("h3", null, "Полная история"));
+    box.append(h("div", { class: "card story" }, ...renderStory(art.story_md)));
+  }
+
+  const cites = art.citations || [];
+  box.append(h("h3", null, "Источники (" + cites.length + ")"));
+  if (!cites.length) box.append(h("div", { class: "empty" }, "Нет привязанных цитат."));
+  for (const c of cites) {
+    const head = h("div", { class: "head" });
+    if (c.authority) head.append(h("span", { class: "chip grey" }, c.authority));
+    if (c.occurred_at) head.append(" " + fmtDate(c.occurred_at));
+    const cite = h("div", { class: "cite" }, head);
+    if (c.video_id) {
+      const t = Math.floor((c.offset_ms || 0) / 1000);
+      cite.append(h("a", { href: "https://youtu.be/" + c.video_id + "?t=" + t, target: "_blank", rel: "noopener" },
+        "youtu.be/" + c.video_id + "?t=" + t));
+    }
+    if (c.text) cite.append(h("div", null, c.text));
+    box.append(cite);
+  }
+
+  // Edit / Delete are allowed for both roles (owner is the professor editing her KB).
+  const editBtn = h("button", { class: "ghost", onclick: () => openEdit() }, "Редактировать");
+  const delBtn = h("button", { class: "warn", onclick: () => doDelete() }, "Удалить");
+  const controls = h("div", { class: "card" }, editBtn, delBtn);
+  box.append(controls);
+
+  function openEdit() {
+    const fTitle = h("input", { type: "text", name: "title", value: art.title || "" });
+    const fStatus = h("select", { name: "status" },
+      h("option", { value: "draft", selected: art.status !== "published" }, "draft"),
+      h("option", { value: "published", selected: art.status === "published" }, "published"));
+    const fPara = h("textarea", { name: "paragraph_ru" }, art.paragraph_ru || "");
+    const fStory = h("textarea", { name: "story_md", style: "min-height:8rem" }, art.story_md || "");
+    const fAliases = h("textarea", { name: "aliases" }, (art.aliases || []).join("\n"));
+    const msg = h("div");
+    const save = h("button", null, "Сохранить");
+    const cancel = h("button", { class: "ghost", onclick: () => renderArticle(clearAndReturn(), slug) }, "Отмена");
+
+    save.addEventListener("click", () => withBusy(save, async () => {
+      clear(msg);
+      // get_article returns full stances/facts/links, so a text-only edit
+      // re-sends them verbatim — no loss (upsert replaces children wholesale).
+      const aliases = [...new Set(fAliases.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))];
+      const body = {
+        slug: art.slug, title: fTitle.value.trim(), status: fStatus.value,
+        paragraph_ru: fPara.value, story_md: fStory.value, aliases,
+        stances: art.stances || [], facts: art.facts || [], links: art.links || [],
+      };
+      if (!body.title) { msg.append(errorBox("Заголовок обязателен.")); return; }
+      try {
+        await api("/api/articles/" + encodeURIComponent(slug),
+          { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        renderArticle(clearAndReturn(), slug); // reload — PUT reindexes and may change title/status
+      } catch (e) { msg.append(errorBox(e)); }
+    }));
+
+    const form = h("div", { class: "card" },
+      h("label", null, "Заголовок"), fTitle,
+      h("label", null, "Статус"), fStatus,
+      h("label", null, "Абзац (ответ бота)"), fPara,
+      h("label", null, "Полная история (markdown)"), fStory,
+      h("label", null, "Синонимы (через запятую или с новой строки)"), fAliases,
+      h("div", { style: "margin-top:.8rem" }, save, cancel), msg);
+    controls.replaceWith(form);
+  }
+
+  function doDelete() {
+    if (!confirm("Удалить статью «" + (art.title || slug) + "»?")) return;
+    withBusy(delBtn, async () => {
+      try {
+        await api("/api/articles/" + encodeURIComponent(slug), { method: "DELETE" });
+        lastBrowseQuery = ""; // the article is gone; drop stale results
+        location.hash = "#browse";
+      } catch (e) { box.append(errorBox(e)); }
+    });
+  }
+  function clearAndReturn() { clear(view); return view; }
 }
 
-async function buildLaunchers() {
-  const token = document.getElementById("token").value.trim();
-  if (!token) return;
-  const cfgJson = JSON.stringify({ server: location.origin, token, pace_ms: 1500 });
-  const src = await fetch("/collector.js").then((r) => r.text());
-  // Snippet: config + full source — console is exempt from CSP/Trusted Types.
-  document.getElementById("snippet").value = `window.AANCHA_CFG=${cfgJson};\n${src}`;
-  // Bookmarklet: fetch source and eval via a Trusted Types policy (CSP test path).
-  const bm = `(()=>{const c=${cfgJson};` +
-    `const p=window.trustedTypes?trustedTypes.createPolicy('aancha'+Math.floor(Math.random()*1e6),{createScript:s=>s}):null;` +
-    `fetch(c.server+'/collector.js').then(r=>r.text()).then(s=>{const code='window.AANCHA_CFG='+JSON.stringify(c)+';'+s;` +
-    `(0,eval)(p?p.createScript(code):code)})})()`;
-  document.getElementById("bookmarklet").href = "javascript:" + encodeURIComponent(bm);
+// Minimal, safe markdown: block-level only (headings / lists / paragraphs),
+// built as DOM text nodes — never innerHTML, never a remote fetch (spec).
+function renderStory(md) {
+  const out = [];
+  let list = null, para = [];
+  const flushPara = () => { if (para.length) { out.push(h("p", null, para.join(" "))); para = []; } };
+  const flushList = () => { if (list) { out.push(list); list = null; } };
+  for (const rawLine of String(md).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    let m;
+    if (!line) { flushPara(); flushList(); continue; }
+    if ((m = /^(#{1,3})\s+(.*)$/.exec(line))) {
+      flushPara(); flushList();
+      out.push(h(m[1].length === 1 ? "h3" : m[1].length === 2 ? "h4" : "h5", null, m[2]));
+    } else if ((m = /^[-*]\s+(.*)$/.exec(line))) {
+      flushPara();
+      if (!list) list = h("ul");
+      list.append(h("li", null, m[1]));
+    } else { flushList(); para.push(line); }
+  }
+  flushPara(); flushList();
+  return out.length ? out : [h("p", { class: "muted" }, "—")];
 }
 
-function copySnippet() {
-  navigator.clipboard.writeText(document.getElementById("snippet").value);
+// ---- Questions --------------------------------------------------------------
+async function renderQuestions(view) {
+  view.append(h("h2", null, "Открытые вопросы"));
+  const list = h("div");
+  view.append(list);
+  list.append(h("div", { class: "empty" }, "Загрузка…"));
+  let questions;
+  try { ({ questions } = await api("/api/questions")); }
+  catch (e) { clear(list); list.append(errorBox(e)); return; }
+  clear(list);
+  if (!questions.length) { list.append(h("div", { class: "empty" }, "нет открытых вопросов")); return; }
+
+  for (const q of questions) {
+    const card = h("div", { class: "card" });
+    const head = h("div", { class: "muted", style: "font-size:.82rem" });
+    if (q.article_slug) head.append(h("a", { href: "#browse/" + q.article_slug }, q.article_slug), " · ");
+    head.append(fmtTs(q.created_at));
+    card.append(head);
+    if (q.context) card.append(h("p", { class: "muted" }, q.context));
+    card.append(h("p", { style: "font-weight:600" }, q.question || "—"));
+    const ta = h("textarea", { name: "answer", placeholder: "Ответ профессора…" });
+    const msg = h("div");
+    const submit = h("button", null, "Отправить");
+    submit.addEventListener("click", () => withBusy(submit, async () => {
+      clear(msg);
+      if (!ta.value.trim()) { msg.append(errorBox("Введите ответ.")); return; }
+      try {
+        await postJson("/api/questions/" + q.id + "/answer", { answer: ta.value });
+        card.replaceWith(); // answered → drop from the list
+        if (!list.querySelector(".card")) list.append(h("div", { class: "empty" }, "нет открытых вопросов"));
+      } catch (e) { msg.append(errorBox(e)); }
+    }));
+    card.append(ta, h("div", { style: "margin-top:.5rem" }, submit), msg);
+    list.append(card);
+  }
 }
 
-loadState();
+// ---- Test -------------------------------------------------------------------
+function renderTest(view) {
+  view.append(h("h2", null, "Тест ответа бота"),
+    h("p", { class: "muted" }, "Запрос как в Telegram → точный ответ движка (production, без LLM)."));
+  const input = h("input", { type: "text", name: "test-q", placeholder: "Например: бессонница", autocomplete: "off" });
+  const submit = h("button", null, "Спросить");
+  const out = h("div");
+  view.append(h("div", { class: "card" }, h("div", { class: "row" }, input, submit)), out);
+
+  async function run() {
+    const q = input.value.trim();
+    if (!q) return; // server 400s on empty; don't bother it
+    clear(out);
+    out.append(h("div", { class: "empty" }, "…"));
+    try {
+      const a = await postJson("/api/test-query", { q });
+      clear(out);
+      out.append(h("div", { style: "margin:.4rem 0" },
+        h("span", { class: "chip " + (a.hit ? "green" : "amber") }, a.hit ? "нашлось" : "не разбиралось"),
+        a.slug ? h("a", { href: "#browse/" + a.slug, style: "margin-left:.5rem" }, a.slug) : null));
+      out.append(h("pre", { class: "answer" }, a.text || "")); // verbatim, newlines preserved
+      if (a.related && a.related.length) {
+        const rel = h("div", { style: "margin-top:.6rem" }, h("span", { class: "muted" }, "Смежные: "));
+        for (const s of a.related)
+          rel.append(h("span", { class: "chip link", onclick: () => { location.hash = "#browse/" + s; } }, s));
+        out.append(rel);
+      }
+    } catch (e) { clear(out); out.append(errorBox(e)); }
+  }
+  submit.addEventListener("click", () => withBusy(submit, run));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+  input.focus();
+}
+
+// ---- Sources ----------------------------------------------------------------
+async function renderSources(view) {
+  view.append(h("h2", null, "Источники (видео)"));
+  const wrap = h("div");
+  view.append(wrap);
+  wrap.append(h("div", { class: "empty" }, "Загрузка…"));
+  let videos;
+  try { ({ videos } = await api("/api/videos")); }
+  catch (e) { clear(wrap); wrap.append(errorBox(e)); return; }
+  clear(wrap);
+  wrap.append(h("p", { class: "muted" }, "Всего: " + videos.length));
+  if (!videos.length) { wrap.append(h("div", { class: "empty" }, "Нет видео.")); return; }
+
+  const thead = h("thead", null, h("tr", null,
+    ...["Название", "Тип", "Дата", "Длит.", "Статусы"].map((t) => h("th", null, t))));
+  const tbody = h("tbody");
+  for (const v of videos) {
+    const statuses = h("td", null,
+      stateChip("meta", !!v.meta_done),
+      stateChip("caption", v.captions),
+      stateChip("comments", v.comments),
+      stateChip("chat", v.chat),
+      stateChip("integrated", !!v.integrated));
+    tbody.append(h("tr", null,
+      h("td", null, h("a", { href: "https://youtu.be/" + v.yt_id, target: "_blank", rel: "noopener" }, v.title || v.yt_id)),
+      h("td", null, v.kind || "—"),
+      h("td", null, fmtDate(v.published)),
+      h("td", null, fmtDur(v.duration_s)),
+      statuses));
+  }
+  wrap.append(h("div", { class: "card", style: "overflow:auto" }, h("table", null, thead, tbody)));
+}
+
+// ---- System (admin only) ----------------------------------------------------
+function renderSystem(view) {
+  if (!isAdmin()) {
+    view.append(h("h2", null, "Система"), h("div", { class: "empty" }, "Раздел доступен только администратору."));
+    return;
+  }
+  view.append(h("h2", null, "Система"));
+
+  const clocks = h("div", { class: "card" }, h("div", { class: "empty" }, "…"));
+  const queue = h("div", { class: "card" }, h("div", { class: "empty" }, "…"));
+
+  // --- harvest / process actions ---
+  const actOut = h("pre", { class: "snippet actions-out", style: "display:none" });
+  const showResult = (v) => { actOut.style.display = "block"; actOut.textContent = JSON.stringify(v, null, 2); };
+  const showErr = (e) => { actOut.style.display = "block"; actOut.textContent = "Ошибка: " + e.message; };
+  const act = (label, fn) => {
+    const b = h("button", { class: "ghost" }, label);
+    b.addEventListener("click", () => withBusy(b, async () => {
+      try { showResult(await fn()); await refreshSystemStatus(); } catch (e) { showErr(e); }
+    }));
+    return b;
+  };
+  const actions = h("div", { class: "card" },
+    h("h3", null, "Действия"),
+    act("Собрать прошлую неделю", () => postJson("/api/harvest/enqueue?direction=back")),
+    act("Собрать новое", () => postJson("/api/harvest/enqueue?direction=forward")),
+    act("Обработать готовое", () => postJson("/api/process/enqueue")),
+    actOut);
+
+  // --- backups ---
+  const backups = h("div", { class: "card" }, h("h3", null, "Бэкапы"), h("div", { class: "empty" }, "…"));
+
+  // --- collector launcher (token stays in the page only) ---
+  const collector = buildCollectorCard();
+
+  // --- MCP placeholder (token wiring lands with P6) ---
+  const mcp = h("div", { class: "card" },
+    h("h3", null, "MCP"),
+    h("div", { class: "kv" },
+      h("dt", null, "Эндпоинт"), h("dd", null, location.origin + "/mcp"),
+      h("dt", null, "Токен"), h("dd", { class: "muted" }, "— (gen-token mcp, появится в P6)")));
+
+  view.append(clocks, queue, actions, backups, collector, mcp);
+
+  // Fill status now and poll while the tab is visible (spec: ~10s).
+  refreshSystemStatus();
+  sysPollTimer = setInterval(() => {
+    if (document.visibilityState === "visible" && parseHash().tab === "system") refreshSystemStatus();
+  }, 10000);
+
+  async function refreshSystemStatus() {
+    try {
+      const [st, bk] = await Promise.all([
+        api("/api/state"),
+        api("/api/backups").catch(() => ({ backups: [] })),
+      ]);
+      STATE = st;
+      fillClocks(clocks, st);
+      fillQueue(queue, st.queue || {});
+      fillBackups(backups, bk.backups || []);
+    } catch (e) {
+      clear(clocks); clocks.append(errorBox(e));
+    }
+  }
+
+  function fillBackups(node, list) {
+    clear(node);
+    node.append(h("h3", null, "Бэкапы"));
+    if (!list.length) node.append(h("div", { class: "empty" }, "Нет бэкапов."));
+    else for (const p of list) node.append(h("div", { class: "muted", style: "font-size:.85rem" }, p));
+    const make = h("button", { style: "margin-top:.6rem" }, "Сделать бэкап");
+    const msg = h("div");
+    make.addEventListener("click", () => withBusy(make, async () => {
+      clear(msg);
+      try { const r = await postJson("/api/backups"); msg.append(h("div", { class: "muted" }, "Создан: " + r.created)); await refreshSystemStatus(); }
+      catch (e) { msg.append(errorBox(e)); }
+    }));
+    node.append(make, msg);
+  }
+}
+
+function fillClocks(node, st) {
+  clear(node);
+  const c = st.clocks || {}, w = st.watermarks || {};
+  node.append(h("h3", null, "Часы и водяные знаки"),
+    h("dl", { class: "kv" },
+      h("dt", null, "Последний сбор"), h("dd", null, fmtTs(c.last_gathered_at)),
+      h("dt", null, "Последняя обработка"), h("dd", null, fmtTs(c.last_processed_at)),
+      h("dt", null, "Последний бэкап"), h("dd", null, fmtTs(c.last_backup_at) + (c.last_backup_status ? " (" + c.last_backup_status + ")" : "")),
+      h("dt", null, "Окно (старое…новое)"), h("dd", null, fmtTs(w.oldest) + " … " + fmtTs(w.newest))));
+}
+
+function fillQueue(node, queue) {
+  clear(node);
+  node.append(h("h3", null, "Очередь"));
+  const tasks = queue.tasks || {};
+  const types = Object.keys(tasks);
+  if (!types.length) node.append(h("div", { class: "empty" }, "Нет задач в очереди."));
+  else {
+    const tbody = h("tbody");
+    for (const t of types)
+      for (const [stt, n] of Object.entries(tasks[t]))
+        tbody.append(h("tr", null, h("td", null, t), h("td", null, stt), h("td", null, String(n))));
+    node.append(h("table", null,
+      h("thead", null, h("tr", null, h("th", null, "Тип"), h("th", null, "Состояние"), h("th", null, "N"))), tbody));
+  }
+  node.append(h("dl", { class: "kv", style: "margin-top:.7rem" },
+    h("dt", null, "Видео"), h("dd", null, String(queue.videos ?? 0)),
+    h("dt", null, "Транскрипты"), h("dd", null, String(queue.transcripts ?? 0)),
+    h("dt", null, "Комментарии"), h("dd", null, String(queue.comments ?? 0)),
+    h("dt", null, "Ответы автора"), h("dd", null, String(queue.author_replies ?? 0))));
+}
+
+// Collector launcher — reuses the working P2 pattern: the token lives only in
+// this page; it is embedded into a draggable bookmarklet and a copyable console
+// snippet, each = config {server, token, pace_ms} + the /collector.js source.
+function buildCollectorCard() {
+  const token = h("input", { type: "password", name: "collector-token", placeholder: "aancha-collector-…", autocomplete: "off" });
+  const bm = h("a", { class: "bm", href: "#" }, "⛏ aancha collect");
+  const snippet = h("pre", { class: "snippet" }, "введите токен, чтобы получить сниппет");
+  const copy = h("button", { class: "ghost" }, "Копировать сниппет");
+  const note = h("span", { class: "muted", style: "font-size:.82rem" });
+
+  async function build() {
+    const t = token.value.trim();
+    if (!t) { snippet.textContent = "введите токен, чтобы получить сниппет"; bm.removeAttribute("href"); return; }
+    const cfgJson = JSON.stringify({ server: location.origin, token: t, pace_ms: 1500 });
+    let src;
+    try { src = await api("/collector.js"); }
+    catch (e) { note.textContent = "не удалось загрузить collector.js: " + e.message; return; }
+    // Snippet: config + full source — the console is exempt from CSP/Trusted Types.
+    snippet.textContent = `window.AANCHA_CFG=${cfgJson};\n${src}`;
+    // Bookmarklet: fetch source and eval via a Trusted-Types policy (CSP path).
+    const code = `(()=>{const c=${cfgJson};` +
+      `const p=window.trustedTypes?trustedTypes.createPolicy('aancha'+Math.floor(Math.random()*1e6),{createScript:s=>s}):null;` +
+      `fetch(c.server+'/collector.js').then(r=>r.text()).then(s=>{const code='window.AANCHA_CFG='+JSON.stringify(c)+';'+s;` +
+      `(0,eval)(p?p.createScript(code):code)})})()`;
+    bm.href = "javascript:" + encodeURIComponent(code);
+  }
+  token.addEventListener("input", build);
+  copy.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(snippet.textContent));
+
+  return h("div", { class: "card" },
+    h("h3", null, "Коллектор"),
+    h("p", { class: "muted", style: "font-size:.85rem" },
+      "Токен из ", h("code", null, "gen-token collector"), ". Остаётся только в этой странице."),
+    token,
+    h("p", { style: "margin:.7rem 0 .3rem" }, bm, " ", note,
+      h("span", { class: "muted", style: "font-size:.82rem" }, " ← перетащите в закладки, затем нажмите на youtube.com. Если CSP блокирует — используйте сниппет:")),
+    snippet, h("div", { style: "margin-top:.5rem" }, copy));
+}
+
+// ---- boot -------------------------------------------------------------------
+async function boot() {
+  try {
+    STATE = await api("/api/state");
+  } catch (e) {
+    // Role unknown → render without the System tab, but let the other tabs work.
+    renderNav("browse");
+    $("view").replaceChildren(errorBox(e),
+      h("button", { onclick: () => location.reload() }, "Повторить"));
+    return;
+  }
+  renderHeader();
+  window.addEventListener("hashchange", route);
+  route();
+}
+boot();
 </script>
+</body>
 </html>
