@@ -69,9 +69,9 @@ Table `tasks`: `id, type, subject (video_id|…), state (pending|claimed|done|fa
 | `harvest_captions` | collector | video | caption tracks (RU/EN) as timed segments, or `none` |
 | `harvest_comments` | collector | video | full comment threads walk |
 | `harvest_chat` | collector | stream | live chat replay walk |
-| `transcribe` | preparer | video | Whisper segments (spawned when captions missing; or by `extract` verdict `needs_transcription` when captions are garbage) |
-| `extract` | preparer | video (transcript + meta + comments + chat) | topics/facts/stances candidates, QA pairs, alias suggestions, style notes — stateless per video |
-| `integrate` | preparer | one extraction | create/merge/link decisions against live KB (agent searches first), final article updates, contradictions → questions. **Serialized** (one active) to avoid merge races |
+| `transcribe` | preparer — **plain script, no LLM** | video | Whisper segments (spawned when captions missing; or by `extract` verdict `needs_transcription` when captions are garbage) |
+| `extract` | preparer — Claude | video (transcript + meta + comments + chat) | topics/facts/stances candidates, QA pairs, alias suggestions, style notes — stateless per video |
+| `integrate` | preparer — Claude | one extraction | create/merge/link decisions against live KB (agent searches first), final article updates, contradictions → questions. **Serialized** (one active) to avoid merge races |
 | *(internal)* index, backup | server | — | tantivy rebuild after integrate batch; daily tarball |
 
 ## 6. Knowledge model
@@ -127,6 +127,7 @@ GET  /api/videos, /api/videos/{id}    inventory + processing status
 GET  /api/questions, POST /api/questions/{id}/answer
 POST /api/test-query                  rendered bot answer (test tab)
 GET  /api/backups                     list; scheduler is internal
+POST /api/backups                     admin: immediate backup now
 ```
 
 ## 9. MCP
@@ -150,7 +151,9 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 
 ## 12. Preparer design
 
-- `PREP.md` playbook in repo: how a Claude session claims tasks, runs `scripts/` (yt-dlp audio fetch, whisper.cpp transcribe — model default `large-v3-turbo`, **P0 verifies**), follows `prompts/*.md`, submits.
+- Two kinds of Mac-side work, split by whether it needs a brain:
+  - **Mechanical → standalone scripts** (`scripts/`): `transcribe_pending.sh` loops claim → yt-dlp audio → whisper.cpp (model default `large-v3-turbo`, **P0 verifies**) → submit, fully unattended — a batch of 50 videos must not burn agent attention. curl + jq, no LLM.
+  - **Judgment → Claude sessions**: `extract`, `integrate`, guided by `PREP.md` playbook + `prompts/*.md`.
 - Interactive for development; **headless** (`claude -p "process next N tasks"`) for routine cycles; queue is worker-agnostic — a Batch-API worker can be added later if bulk demands, without server changes.
 - Anthropic usage via subscription sessions; no API-orchestration code.
 
@@ -177,7 +180,7 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - **Build**: on the Mac — `cargo-zigbuild` → static `x86_64-unknown-linux-musl` binary, SPA embedded; `FROM scratch` image (~15 MB) assembled server-side from scp'd binary (no registry, no server compiles).
 - `~vany/aancha/`: `docker-compose.yml`, `aancha.toml`, `data/` (SQLite WAL, zstd raw blobs), `index/` (tantivy, rebuildable), `backups/`.
 - Container: `mem_limit` (e.g. 256 MB), restart unless-stopped, binds 127.0.0.1 only.
-- **Backups**: internal scheduler (no cron), daily `backups/aancha-YYYY-MM-DD.tar.gz` = SQLite snapshot + config (index excluded), keep 3 pruned; Vany archives off-box. Restore: `aancha-server restore --latest --yes` (destructive: stop, wipe data, untar, reindex).
+- **Backups**: internal scheduler (no cron), daily `backups/aancha-YYYY-MM-DD.tar.gz` = SQLite snapshot + config (index excluded), keep 3 pruned; Vany archives off-box. **Immediate backup on demand**: `aancha-server backup` CLI subcommand + System-tab button (`POST /api/backups`) — same tarball format, timestamped, e.g. before risky operations. Restore: `aancha-server restore --latest --yes` (destructive: stop, wipe data, untar, reindex).
 - Logs: tracing JSON → stdout → `docker logs`.
 
 ## 16. Costs
@@ -230,3 +233,5 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - 2026-07-19 — Backups: service-internal daily dated tarball (no cron), keep-N, off-box archiving manual; `restore --latest` drop-and-restore command. — *(V+C)*
 - 2026-07-19 — Deploy: n1.serezhkin.com `~vany/aancha`, existing nginx + Let's Encrypt, app on 127.0.0.1:8087, scratch image from Mac-built static musl binary. — *(V+C)*
 - 2026-07-19 — Anthropic: no API-orchestration code; prompts as artifacts executed by Claude sessions. — *(V)*
+- 2026-07-19 — Immediate backup: `aancha-server backup` CLI + System-tab button, same tarball as daily. — *(V)*
+- 2026-07-19 — Mac-side split: mechanical tasks (transcribe) = unattended shell scripts; judgment tasks (extract/integrate) = Claude sessions. — *(V+C)*
