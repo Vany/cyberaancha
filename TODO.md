@@ -5,12 +5,14 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 
 ## P1 — server skeleton + first deploy
 - [x] cargo scaffold: CLI (serve/backup/restore/set-password/gen-token), config, tracing, /healthz
-- [ ] SQLite layer: pool, migrations runner, `auth` + `meta` tables
-- [ ] `set-password` / `gen-token` CLI (argon2 / blake3-at-rest)
-- [ ] basic-auth middleware with owner/admin roles; bearer middleware for collector/preparer/mcp
-- [ ] backup: tarball create + prune + daily internal scheduler; `backup` CLI; `restore --latest --yes`
-- [ ] deploy tooling: zig + cargo-zigbuild install, Makefile (build-linux/deploy), scratch Dockerfile, compose
-- [ ] n1: nginx vhost + certbot (**needs DNS A-record — Vany**), `~vany/aancha` layout, first deploy
+- [x] SQLite layer: single-conn mutex + spawn_blocking, migrations via user_version, `auth` + `meta`
+- [x] `set-password` / `gen-token` CLI (argon2 / blake3-at-rest; stdin-pipe provisioning)
+- [x] basic-auth middleware, owner/admin roles, verify-cache, 250 ms failed-attempt brake (bearer mw → P2/P6 with consumers)
+- [x] backup: create/prune/daily scheduler, `backup` CLI + POST /api/backups (admin-only), `restore --latest --yes` with listen-guard + pre-restore safety copy
+- [x] deploy tooling: zig + cargo-zigbuild, Makefile (build-linux/deploy/logs), scratch Dockerfile, compose (host net, 256 MB cap, uid 1000)
+- [x] first deploy to n1: container up, 640 KiB RSS, healthz ok, migrations ran
+- [ ] n1: nginx vhost + certbot — **blocked on Vany**: DNS A-record + sudo commands in deploy/README.md
+- [ ] credentials on n1 (deploy/README.md) — after TLS, Vany picks passwords
 - [ ] smoke: `https://aancha.serezhkin.com/healthz` green
 
 ## P2 — queue + collector (first harvest)

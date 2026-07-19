@@ -2,6 +2,13 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — P1 built and deployed (TLS pending Vany)
+
+- Server core: db (single-conn mutex, `call`/`with`, user_version migrations), auth (argon2 0.5, blake3 tokens `aancha-<purpose>-<hex>`, rotation invalidates), basic-auth middleware (username = role; 10-min verify cache; 250 ms brake), backup (VACUUM INTO → tar.gz, prune keep-N, daily tokio loop, restore with listen-guard + pre-restore copy), /api/state + /api/backups.
+- Deployed to n1 via zigbuild → 4.6 MB static musl → scratch image: **640 KiB RSS** idle. Gotchas hit: rusqlite 0.40 needs rustc ≥1.95 (`cfg_select` in libsqlite3-sys) → toolchain updated 1.94.1→1.97.1; argon2 0.5 default features lack OsRng → salt via `rand::random` + `SaltString::encode_b64`.
+- Compose: host networking (app's 127.0.0.1 bind is the boundary), uid 1000, mem 256 MB. Blocked on Vany: DNS A-record, then sudo nginx+certbot lines, then credentials — all in deploy/README.md.
+- Repo: github.com/Vany/cyberaancha (private), origin set.
+
 ## 2026-07-19 — P0 research done
 
 - Full findings + sources: `research/p0-findings.md`. Raw channel listings: `research/inv_*.txt`.

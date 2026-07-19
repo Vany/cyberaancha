@@ -1,10 +1,16 @@
 //! aancha-server — CLI dispatch only (PROG.md layout). Everything real lives in modules.
 
+mod auth;
+mod backup;
 mod config;
+mod db;
+mod http;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "aancha-server", version, about = "Knowledge base server for cyberaancha")]
@@ -22,16 +28,16 @@ enum Cmd {
     Serve,
     /// Create a dated backup tarball immediately
     Backup,
-    /// Drop everything and restore from a backup (destructive)
+    /// Drop the live DB and restore the newest backup (destructive)
     Restore {
         /// Restore the newest tarball
         #[arg(long)]
         latest: bool,
-        /// Required confirmation — this wipes current data
+        /// Required confirmation — replaces current data
         #[arg(long)]
         yes: bool,
     },
-    /// Set panel password for a role (owner | admin)
+    /// Set panel password for a role (owner | admin); reads stdin if piped
     SetPassword { role: String },
     /// Generate and store a bearer token (collector | preparer | mcp); prints it once
     GenToken { purpose: String },
@@ -49,18 +55,78 @@ fn main() -> Result<()> {
     let cfg = config::Config::load(&cli.config)?;
 
     match cli.cmd {
-        Cmd::Serve => serve(cfg),
-        // Fail loudly until implemented (P1 tasks in TODO.md) — never a silent no-op.
-        Cmd::Backup => bail!("backup: not implemented yet (P1)"),
-        Cmd::Restore { .. } => bail!("restore: not implemented yet (P1)"),
-        Cmd::SetPassword { .. } => bail!("set-password: not implemented yet (P1)"),
-        Cmd::GenToken { .. } => bail!("gen-token: not implemented yet (P1)"),
+        Cmd::Serve => serve(cfg, cli.config),
+        Cmd::Backup => {
+            let file = open_db(&cfg)?.with(|c| backup::create(c, &cfg, &cli.config))?;
+            println!("{}", file.display());
+            Ok(())
+        }
+        Cmd::Restore { latest, yes } => {
+            if !latest {
+                bail!("only --latest restore is supported");
+            }
+            if !yes {
+                bail!("restore replaces the current database — re-run with --yes");
+            }
+            let from = backup::restore_latest(&cfg)?;
+            println!("restored from {}", from.display());
+            Ok(())
+        }
+        Cmd::SetPassword { role } => {
+            let password = read_secret(&format!("New password for {role}: "))?;
+            open_db(&cfg)?.with(|c| auth::set_password(c, &role, &password))?;
+            println!("password for {role} set");
+            Ok(())
+        }
+        Cmd::GenToken { purpose } => {
+            let token = open_db(&cfg)?.with(|c| auth::gen_token(c, &purpose))?;
+            println!("{token}");
+            eprintln!("(stored hashed; this is the only time it is shown)");
+            Ok(())
+        }
+    }
+}
+
+fn open_db(cfg: &config::Config) -> Result<db::Db> {
+    db::Db::open(&cfg.server.data_dir)
+}
+
+/// Interactive: prompt without echo, confirm twice. Piped: read one line —
+/// enables provisioning like `echo pw | aancha-server set-password owner`.
+fn read_secret(prompt: &str) -> Result<String> {
+    if std::io::stdin().is_terminal() {
+        let first = rpassword::prompt_password(prompt)?;
+        let second = rpassword::prompt_password("Repeat: ")?;
+        if first != second {
+            bail!("passwords do not match");
+        }
+        Ok(first)
+    } else {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).context("reading password from stdin")?;
+        Ok(line.trim_end_matches(['\r', '\n']).to_owned())
     }
 }
 
 #[tokio::main]
-async fn serve(cfg: config::Config) -> Result<()> {
-    let app = axum::Router::new().route("/healthz", axum::routing::get(healthz));
+async fn serve(cfg: config::Config, config_path: PathBuf) -> Result<()> {
+    let db = open_db(&cfg)?;
+    let cfg = Arc::new(cfg);
+    tracing::debug!(
+        writer_heap_mb = cfg.index.writer_heap_mb,
+        pace_ms = cfg.harvest.pace_ms,
+        "config loaded"
+    );
+
+    tokio::spawn(backup::daily_loop(db.clone(), cfg.clone(), config_path.clone()));
+
+    let state = http::AppState {
+        db,
+        cfg: cfg.clone(),
+        config_path: Arc::new(config_path),
+        basic_cache: Default::default(),
+    };
+    let app = http::router(state);
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.bind).await?;
     tracing::info!(bind = %cfg.server.bind, channel = %cfg.channel.handle, "aancha-server up");
@@ -70,10 +136,6 @@ async fn serve(cfg: config::Config) -> Result<()> {
         .await?;
     tracing::info!("shut down cleanly");
     Ok(())
-}
-
-async fn healthz() -> &'static str {
-    "ok"
 }
 
 async fn shutdown_signal() {

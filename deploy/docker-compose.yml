@@ -1,0 +1,16 @@
+# Runs on n1 in ~vany/aancha. Host networking: the app itself binds
+# 127.0.0.1:8087 (config) — that is the security boundary; nginx terminates TLS.
+services:
+  aancha:
+    build: .
+    image: aancha-server
+    network_mode: host
+    user: "1000:1000" # vany on n1 — volume files stay owned by him
+    working_dir: /app
+    restart: unless-stopped
+    mem_limit: 256m # n1 has 457 MB total (SPEC C7)
+    volumes:
+      - ./aancha.toml:/app/aancha.toml:ro
+      - ./data:/app/data
+      - ./index:/app/index
+      - ./backups:/app/backups
