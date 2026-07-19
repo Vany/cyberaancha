@@ -55,6 +55,7 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [ ] disk decision on n1 (volume/resize/prune policy)
 - [ ] wipe + reconfigure channel → @AnchaBaranovaProf; walk windows backward; questions loop live
 - [ ] collector polish for Ancha (Tampermonkey?) if owner-only data needed
+- [ ] owner-facing collector entry point (today it's admin-only System tab); C9 help already written, plain-Russian walkthrough done
 
 ## P8 — Telegram bot (post-MVP)
 - [ ] teloxide, group mention handling, same answer engine, per-user rate limits
