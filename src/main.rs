@@ -5,6 +5,8 @@ mod backup;
 mod config;
 mod db;
 mod http;
+mod queue;
+mod raw;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};

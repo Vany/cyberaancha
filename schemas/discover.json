@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "discover result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["channel_id", "videos"],
+  "properties": {
+    "channel_id": { "type": "string", "pattern": "^UC[0-9A-Za-z_-]{22}$" },
+    "videos": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["yt_id", "title", "kind"],
+        "properties": {
+          "yt_id": { "type": "string", "pattern": "^[0-9A-Za-z_-]{11}$" },
+          "title": { "type": "string", "maxLength": 500 },
+          "kind": { "enum": ["video", "stream"] },
+          "approx_published": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "parsed from relative text; batching heuristic, not truth"
+          },
+          "duration_s": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    }
+  }
+}

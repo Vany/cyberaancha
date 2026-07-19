@@ -1,0 +1,82 @@
+<!doctype html>
+<!-- Minimal P2 admin: state view, wave control, collector launcher.
+     The real SPA shell replaces this in P5. -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aancha admin</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 780px; margin: 2rem auto; padding: 0 1rem; background: #fafafa; color: #222; }
+  h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 1.6rem; }
+  pre { background: #14161a; color: #cde; padding: .8rem; border-radius: 8px; overflow: auto; font-size: 12px; }
+  button { padding: .4rem .9rem; border: 0; border-radius: 6px; background: #2a6df4; color: #fff; cursor: pointer; margin-right: .5rem; }
+  button.warn { background: #b23; }
+  input[type=password], input[type=text] { width: 100%; padding: .4rem; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; }
+  textarea { width: 100%; height: 90px; font: 11px monospace; }
+  a.bm { display: inline-block; padding: .4rem .9rem; background: #2a8f4a; color: #fff; border-radius: 6px; text-decoration: none; }
+  .note { color: #666; font-size: 12px; }
+</style>
+
+<h1>aancha — admin (P2 minimal)</h1>
+
+<h2>State</h2>
+<pre id="state">loading…</pre>
+<button onclick="loadState()">refresh</button>
+
+<h2>Harvest wave</h2>
+<button onclick="enqueue('back')">gather older week</button>
+<button onclick="enqueue('forward')">gather new since watermark</button>
+<span id="waveMsg" class="note"></span>
+
+<h2>Collector launcher</h2>
+<p class="note">Paste the collector token (from <code>gen-token collector</code>). It stays in this page only.</p>
+<input type="password" id="token" placeholder="aancha-collector-…" oninput="buildLaunchers()">
+<p>
+  <a class="bm" id="bookmarklet" href="#">⛏ aancha collect</a>
+  <span class="note">← drag to bookmarks bar, then click it on any youtube.com page. If YouTube's CSP blocks it, use the snippet:</span>
+</p>
+<textarea id="snippet" readonly placeholder="snippet appears when token is set"></textarea>
+<button onclick="copySnippet()">copy snippet</button>
+<span class="note">Open youtube.com → DevTools console → paste → Enter.</span>
+
+<script>
+const j = (r) => { if (!r.ok) throw new Error(r.status); return r.json(); };
+
+async function loadState() {
+  try {
+    document.getElementById("state").textContent =
+      JSON.stringify(await fetch("/api/state").then(j), null, 2);
+  } catch (e) { document.getElementById("state").textContent = "error: " + e; }
+}
+
+async function enqueue(direction) {
+  const el = document.getElementById("waveMsg");
+  try {
+    const res = await fetch("/api/harvest/enqueue?direction=" + direction, { method: "POST" }).then(j);
+    el.textContent = JSON.stringify(res);
+    loadState();
+  } catch (e) { el.textContent = "error: " + e; }
+}
+
+async function buildLaunchers() {
+  const token = document.getElementById("token").value.trim();
+  if (!token) return;
+  const cfgJson = JSON.stringify({ server: location.origin, token, pace_ms: 1500 });
+  const src = await fetch("/collector.js").then((r) => r.text());
+  // Snippet: config + full source — console is exempt from CSP/Trusted Types.
+  document.getElementById("snippet").value = `window.AANCHA_CFG=${cfgJson};\n${src}`;
+  // Bookmarklet: fetch source and eval via a Trusted Types policy (CSP test path).
+  const bm = `(()=>{const c=${cfgJson};` +
+    `const p=window.trustedTypes?trustedTypes.createPolicy('aancha'+Math.floor(Math.random()*1e6),{createScript:s=>s}):null;` +
+    `fetch(c.server+'/collector.js').then(r=>r.text()).then(s=>{const code='window.AANCHA_CFG='+JSON.stringify(c)+';'+s;` +
+    `(0,eval)(p?p.createScript(code):code)})})()`;
+  document.getElementById("bookmarklet").href = "javascript:" + encodeURIComponent(bm);
+}
+
+function copySnippet() {
+  navigator.clipboard.writeText(document.getElementById("snippet").value);
+}
+
+loadState();
+</script>
+</html>

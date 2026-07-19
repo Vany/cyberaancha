@@ -9,7 +9,10 @@ use std::sync::{Arc, Mutex};
 
 /// Registry of migrations, applied in order via PRAGMA user_version.
 /// Adding a file without listing it here means it never runs — keep in sync.
-const MIGRATIONS: &[(&str, &str)] = &[("001_init", include_str!("migrations/001_init.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("001_init", include_str!("migrations/001_init.sql")),
+    ("002_queue", include_str!("migrations/002_queue.sql")),
+];
 
 pub const DB_FILE: &str = "aancha.db";
 

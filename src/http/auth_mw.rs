@@ -112,3 +112,40 @@ async fn reject(user: &str) -> Response {
     tokio::time::sleep(Duration::from_millis(250)).await;
     challenge()
 }
+
+/// Bearer auth for the collector edge; token hashes live in the DB auth table.
+/// preparer/mcp variants arrive with their phases as equally thin wrappers.
+pub async fn collector_auth(state: State<AppState>, req: Request, next: Next) -> Response {
+    check_bearer(state, req, next, "collector").await
+}
+
+async fn check_bearer(
+    State(st): State<AppState>,
+    req: Request,
+    next: Next,
+    purpose: &'static str,
+) -> Response {
+    let presented = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_owned);
+    let Some(token) = presented else {
+        return (StatusCode::UNAUTHORIZED, "bearer token required").into_response();
+    };
+    let ok = st
+        .db
+        .call(move |c| auth::verify_token(c, purpose, &token))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %format!("{e:#}"), "token check failed");
+            false
+        });
+    if !ok {
+        tracing::warn!(purpose, "failed bearer attempt");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        return (StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    }
+    next.run(req).await
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "harvest_meta result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["yt_id", "title", "published_at"],
+  "properties": {
+    "yt_id": { "type": "string", "pattern": "^[0-9A-Za-z_-]{11}$" },
+    "title": { "type": "string", "maxLength": 500 },
+    "description": { "type": "string", "maxLength": 20000 },
+    "published_at": { "type": "string", "format": "date-time" },
+    "duration_s": { "type": ["integer", "null"], "minimum": 0 },
+    "channel_id": { "type": ["string", "null"], "pattern": "^UC[0-9A-Za-z_-]{22}$" },
+    "is_live_content": { "type": "boolean" },
+    "view_count": { "type": ["integer", "null"], "minimum": 0 },
+    "raw_player": { "type": "string", "maxLength": 2000000, "description": "JSON text of the player response for raw_docs" }
+  }
+}
