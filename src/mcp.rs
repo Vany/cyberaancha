@@ -21,6 +21,7 @@ use std::sync::Arc;
 pub struct AanchaMcp {
     db: Db,
     index: Arc<SearchIndex>,
+    owner_name: String,
     // Consumed by the #[tool_handler]-generated call_tool routing (verified: all
     // tools list and call correctly). The compiler can't see through the macro.
     #[allow(dead_code)]
@@ -53,8 +54,8 @@ fn oops(e: anyhow::Error) -> McpError {
 
 #[tool_router]
 impl AanchaMcp {
-    pub fn new(db: Db, index: Arc<SearchIndex>) -> Self {
-        Self { db, index, tool_router: Self::tool_router() }
+    pub fn new(db: Db, index: Arc<SearchIndex>, owner_name: String) -> Self {
+        Self { db, index, owner_name, tool_router: Self::tool_router() }
     }
 
     #[tool(description = "Full-text search Prof. Baranova's knowledge base. Returns matching article slugs, titles, and BM25 scores.")]
@@ -172,13 +173,13 @@ impl ServerHandler for AanchaMcp {
         info.server_info = Implementation::from_build_env();
         info.server_info.name = "aancha".into();
         info.server_info.version = env!("CARGO_PKG_VERSION").into();
-        info.instructions = Some(
-            "Curated knowledge base of Prof. Ancha Baranova's public statements \
-             (YouTube). Search topics, read articles (with sources and opinion \
-             timelines), review and answer open questions. Reference material — \
-             quotes and attributes the professor; not medical advice."
-                .into(),
-        );
+        info.instructions = Some(format!(
+            "Curated knowledge base of {}'s public statements (YouTube). Search \
+             topics, read articles (with sources and opinion timelines), review \
+             and answer open questions. Reference material — quotes and attributes \
+             the owner; not medical advice.",
+            self.owner_name,
+        ));
         info
     }
 }
@@ -193,6 +194,7 @@ pub fn service(
     db: Db,
     index: Arc<SearchIndex>,
     public_host: Option<String>,
+    owner_name: String,
 ) -> StreamableHttpService<AanchaMcp, LocalSessionManager> {
     let mut allowed_hosts: Vec<String> =
         vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
@@ -202,7 +204,7 @@ pub fn service(
     // Config is #[non_exhaustive] — use the builder method, not a struct literal.
     let config = StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts);
     StreamableHttpService::new(
-        move || Ok(AanchaMcp::new(db.clone(), index.clone())),
+        move || Ok(AanchaMcp::new(db.clone(), index.clone(), owner_name.clone())),
         Arc::new(LocalSessionManager::default()),
         config,
     )

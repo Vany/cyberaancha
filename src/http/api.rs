@@ -42,6 +42,8 @@ pub async fn state(State(st): State<AppState>, Extension(role): Extension<Role>)
             body["version"] = json!(env!("CARGO_PKG_VERSION"));
             body["role"] = json!(role);
             body["channel"] = json!(st.cfg.channel.handle);
+            body["brand"] = json!(st.cfg.brand());
+            body["owner"] = json!(st.cfg.owner_display());
             body["window_days"] = json!(st.cfg.harvest.window_days);
             axum::Json(body).into_response()
         }
@@ -238,7 +240,8 @@ pub async fn test_query(State(st): State<AppState>, axum::Json(body): axum::Json
         return bad_request(anyhow::anyhow!("empty query"));
     }
     let idx = st.index.clone();
-    match st.db.call(move |c| answer::answer(c, &idx, &body.q)).await {
+    let cfg = st.cfg.clone();
+    match st.db.call(move |c| answer::answer(c, &idx, &cfg.owner, &body.q)).await {
         Ok(a) => axum::Json(a).into_response(),
         Err(e) => internal(e),
     }

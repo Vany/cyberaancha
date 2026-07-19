@@ -4,6 +4,15 @@
 [channel]
 handle = "@vanyserezhkin" # production: "@AnchaBaranovaProf"
 
+# User-facing identity — the product isn't hardcoded to one person. All optional;
+# omit for generic defaults (brand derived from the handle, "автора", plain
+# disclaimer). Production (Ancha) instance sets:
+[owner]
+name = "Ancha Baranova"                                                              # English / MCP
+ref = "профессора"                                                                   # "Мнение <ref>:" (genitive)
+disclaimer = "Справочный материал по выступлениям проф. Барановой, не медицинская рекомендация."
+brand = "aancha"                                                                     # panel title; omit → derived from handle
+
 [server]
 bind = "127.0.0.1:8087"
 public_url = "https://aancha.serezhkin.com"

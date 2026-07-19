@@ -2,6 +2,7 @@
 //! This is exactly what the Telegram bot will send (test tab now, TG later).
 //! No LLM (C1): it only selects a prebaked article and formats its links.
 
+use crate::config::Owner;
 use crate::index::SearchIndex;
 use crate::kb;
 use anyhow::Result;
@@ -29,29 +30,21 @@ pub struct Answer {
     pub related: Vec<String>,
 }
 
-pub fn answer(conn: &Connection, index: &SearchIndex, query: &str) -> Result<Answer> {
+pub fn answer(conn: &Connection, index: &SearchIndex, owner: &Owner, query: &str) -> Result<Answer> {
     let hits = index.search(query, 6)?;
     let best = hits.first().filter(|h| h.score >= SCORE_FLOOR);
+    // Impersonal — grammatically safe for any owner (no case conjugation needed).
+    let miss = "Эта тема пока не разбиралась. Вопрос сохранён.";
 
     let Some(best) = best else {
         kb::log_query(conn, query, None, hits.first().map(|h| h.score))?;
-        return Ok(Answer {
-            hit: false,
-            text: "Профессор эту тему пока не разбирала. Вопрос сохранён.".to_string(),
-            slug: None,
-            related: vec![],
-        });
+        return Ok(Answer { hit: false, text: miss.into(), slug: None, related: vec![] });
     };
 
     kb::log_query(conn, query, Some(&best.slug), Some(best.score))?;
     let Some(article) = kb::get_article(conn, &best.slug)? else {
         // Index and DB disagree (article deleted since last rebuild) — treat as miss.
-        return Ok(Answer {
-            hit: false,
-            text: "Профессор эту тему пока не разбирала. Вопрос сохранён.".to_string(),
-            slug: None,
-            related: vec![],
-        });
+        return Ok(Answer { hit: false, text: miss.into(), slug: None, related: vec![] });
     };
 
     let related: Vec<String> = hits
@@ -64,13 +57,13 @@ pub fn answer(conn: &Connection, index: &SearchIndex, query: &str) -> Result<Ans
 
     Ok(Answer {
         hit: true,
-        text: render(&article, &related),
+        text: render(&article, &related, owner),
         slug: Some(article.slug),
         related,
     })
 }
 
-fn render(article: &kb::ArticleView, related: &[String]) -> String {
+fn render(article: &kb::ArticleView, related: &[String], owner: &Owner) -> String {
     let mut links = vec![];
     let mut latest_reconsider: Option<String> = None;
     for c in &article.citations {
@@ -95,12 +88,13 @@ fn render(article: &kb::ArticleView, related: &[String]) -> String {
     }
     out.push_str(".\n");
     if !article.paragraph_ru.is_empty() {
-        out.push_str(&format!("Мнение профессора: {}\n", article.paragraph_ru));
+        out.push_str(&format!("Мнение {}: {}\n", owner.reference, article.paragraph_ru));
     }
     if !related.is_empty() {
         out.push_str(&format!("Смежные темы: {}.\n", related.join(", ")));
     }
-    out.push_str("— Справочный материал по выступлениям проф. Барановой, не медицинская рекомендация.");
+    out.push_str("— ");
+    out.push_str(&owner.disclaimer);
     out
 }
 
@@ -159,13 +153,17 @@ mod tests {
         db.with(|c| {
             seed(c);
             idx.rebuild(&kb::index_docs(c)?)?;
-            let a = answer(c, &idx, "боль в заднице")?;
+            // Config-driven owner branding must appear verbatim in the answer.
+            let mut owner = crate::config::Owner::default();
+            owner.reference = "профессора".into();
+            owner.disclaimer = "Материал по выступлениям проф. Барановой, не совет.".into();
+            let a = answer(c, &idx, &owner, "боль в заднице")?;
             assert!(a.hit);
             // Newest stance (2026, video bbbb) leads the citations.
             assert!(a.text.contains("https://youtu.be/bbbbbbbbbbb?t=30"));
             assert!(a.text.contains("https://youtu.be/aaaaaaaaaaa?t=60"));
-            assert!(a.text.contains("не медицинская рекомендация"));
             assert!(a.text.contains("Мнение профессора"));
+            assert!(a.text.contains("проф. Барановой, не совет.")); // config disclaimer
             // Query was logged as a hit.
             let logged: String =
                 c.query_row("SELECT hit_slug FROM queries ORDER BY id DESC LIMIT 1", [], |r| r.get(0))?;
@@ -182,7 +180,8 @@ mod tests {
         db.with(|c| {
             seed(c);
             idx.rebuild(&kb::index_docs(c)?)?;
-            let a = answer(c, &idx, "нейтронные звёзды")?;
+            let owner = crate::config::Owner::default();
+            let a = answer(c, &idx, &owner, "нейтронные звёзды")?;
             assert!(!a.hit);
             assert!(a.text.contains("пока не разбирала"));
             let miss: Option<String> =

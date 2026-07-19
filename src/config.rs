@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub channel: Channel,
     #[serde(default)]
+    pub owner: Owner,
+    #[serde(default)]
     pub server: Server,
     #[serde(default)]
     pub harvest: Harvest,
@@ -23,6 +25,55 @@ pub struct Config {
 pub struct Channel {
     /// e.g. "@vanyserezhkin" (test) or "@AnchaBaranovaProf" (production)
     pub handle: String,
+}
+
+/// User-facing identity of the channel owner, so the product isn't hardcoded to
+/// one person. Defaults describe Prof. Baranova; override per instance.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Owner {
+    /// Display name (English/MCP), e.g. "Ancha Baranova".
+    pub name: String,
+    /// How the bot refers to the owner in answers — genitive: "Мнение <reference>:".
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// The full attribution/disclaimer line appended to every bot answer.
+    pub disclaimer: String,
+    /// Short instance brand shown in the panel header/title. Empty ⇒ derived from
+    /// the channel handle (see `Config::brand`).
+    pub brand: String,
+}
+
+impl Default for Owner {
+    fn default() -> Self {
+        // Generic defaults — the code is not hardcoded to any one person. The
+        // production instance overrides these in `[owner]` (see aancha.toml.example).
+        Self {
+            name: String::new(),
+            reference: "автора".into(),
+            disclaimer: "Справочный материал, не медицинская рекомендация.".into(),
+            brand: String::new(),
+        }
+    }
+}
+
+impl Config {
+    /// Panel brand: explicit config, else derived from the channel handle.
+    pub fn brand(&self) -> String {
+        if !self.owner.brand.is_empty() {
+            return self.owner.brand.clone();
+        }
+        self.channel.handle.trim_start_matches('@').to_string()
+    }
+
+    /// Owner display name (English/MCP): explicit config, else the brand.
+    pub fn owner_display(&self) -> String {
+        if self.owner.name.is_empty() {
+            self.brand()
+        } else {
+            self.owner.name.clone()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -104,7 +104,8 @@ pub fn router(state: AppState) -> axum::Router {
     // is a tower Service nested here; the middleware guards it.
     let mcp_host = crate::mcp::host_of(&state.cfg.server.public_url);
     let mcp = axum::Router::new()
-        .nest_service("/mcp", crate::mcp::service(state.db.clone(), state.index.clone(), mcp_host))
+        .nest_service("/mcp", crate::mcp::service(
+            state.db.clone(), state.index.clone(), mcp_host, state.cfg.owner_display()))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth_mw::mcp_auth));
 
     axum::Router::new()

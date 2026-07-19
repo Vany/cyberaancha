@@ -249,7 +249,14 @@ function renderHeader() {
   const m = $("meta");
   clear(m);
   if (!STATE) return;
+  // Brand + title come from config (derived from the channel/owner), not hardcoded.
+  const brand = STATE.brand || "aancha";
+  const brandEl = document.querySelector(".brand");
+  if (brandEl) brandEl.textContent = brand;
+  document.title = brand + " — admin";
   m.append(
+    STATE.owner ? h("span", null, STATE.owner) : null,
+    STATE.owner ? h("span", null, "·") : null,
     h("span", null, STATE.channel || "—"),
     h("span", null, "·"),
     h("span", null, "v" + (STATE.version || "?")),

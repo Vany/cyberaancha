@@ -400,7 +400,7 @@ mod tests {
 
             // Reindex + answer: colloquial query finds the article via alias.
             idx.rebuild(&kb::index_docs(c)?)?;
-            let a = crate::answer::answer(c, &idx, "бессонница")?;
+            let a = crate::answer::answer(c, &idx, &crate::config::Owner::default(), "бессонница")?;
             assert!(a.hit);
             assert_eq!(a.slug.as_deref(), Some("melatonin"));
             assert!(a.text.contains("https://youtu.be/vid00000001?t=60"));
