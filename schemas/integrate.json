@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "integrate result — the articles a video touched, plus questions raised",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["articles"],
+  "properties": {
+    "needs_transcription": {
+      "type": "boolean",
+      "description": "captions were garbage; spawn a Whisper transcribe task instead of integrating"
+    },
+    "articles": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slug", "title"],
+        "properties": {
+          "slug": { "type": "string", "pattern": "^[a-z0-9-]{1,80}$" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "paragraph_ru": { "type": "string", "maxLength": 2000 },
+          "story_md": { "type": "string", "maxLength": 100000 },
+          "status": { "enum": ["draft", "published"] },
+          "aliases": {
+            "type": "array", "maxItems": 200,
+            "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          "stances": {
+            "type": "array", "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text", "source_kind", "authority"],
+              "properties": {
+                "text": { "type": "string", "minLength": 1, "maxLength": 5000 },
+                "video_id": { "type": ["string", "null"], "pattern": "^[0-9A-Za-z_-]{11}$" },
+                "offset_ms": { "type": ["integer", "null"], "minimum": 0 },
+                "source_kind": { "enum": ["video", "comment", "chat", "panel"] },
+                "source_ref": { "type": ["string", "null"], "maxLength": 200 },
+                "authority": { "enum": ["panel", "comment_author", "spoken", "inferred"] },
+                "occurred_at": { "type": ["string", "null"], "format": "date-time" }
+              }
+            }
+          },
+          "facts": {
+            "type": "array", "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text", "source_kind", "authority"],
+              "properties": {
+                "text": { "type": "string", "minLength": 1, "maxLength": 5000 },
+                "source_kind": { "enum": ["video", "comment", "chat", "panel"] },
+                "source_ref": { "type": ["string", "null"], "maxLength": 200 },
+                "authority": { "enum": ["panel", "comment_author", "spoken", "inferred"] },
+                "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+              }
+            }
+          },
+          "links": {
+            "type": "array", "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["to_slug", "kind"],
+              "properties": {
+                "to_slug": { "type": "string", "pattern": "^[a-z0-9-]{1,80}$" },
+                "kind": { "enum": ["related", "parent", "contradicts"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "maxItems": 100,
+      "description": "contradictions / gaps found while integrating — go to the professor's queue",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["context", "question"],
+        "properties": {
+          "article_slug": { "type": ["string", "null"], "pattern": "^[a-z0-9-]{1,80}$" },
+          "context": { "type": "string", "maxLength": 5000 },
+          "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ pub mod auth_mw;
 
 use crate::config::Config;
 use crate::db::Db;
+use crate::index::SearchIndex;
 use axum::http::{HeaderValue, Method, header};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +21,15 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub config_path: Arc<PathBuf>,
     pub basic_cache: auth_mw::BasicCache,
+    pub index: Arc<SearchIndex>,
+}
+
+/// Rebuild the search index from the DB's published articles. Called after
+/// integrate changes the KB; runs the tantivy write off the async threads.
+pub async fn reindex(state: &AppState) -> anyhow::Result<usize> {
+    let docs = state.db.call(|c| crate::kb::index_docs(c)).await?;
+    let index = state.index.clone();
+    tokio::task::spawn_blocking(move || index.rebuild(&docs)).await?
 }
 
 pub fn router(state: AppState) -> axum::Router {
@@ -29,10 +39,29 @@ pub fn router(state: AppState) -> axum::Router {
         .route("/api/state", get(api::state))
         .route("/api/backups", get(api::backups_list).post(api::backup_now))
         .route("/api/harvest/enqueue", post(api::harvest_enqueue))
+        .route("/api/process/enqueue", post(api::process_enqueue))
+        .route("/api/test-query", post(api::test_query))
+        .route("/api/articles", get(api::articles_search))
+        .route("/api/articles/{slug}", get(api::article_get).put(api::article_put))
+        .route("/api/questions", get(api::questions_list))
+        .route("/api/questions/{id}/answer", post(api::question_answer))
         .route("/admin", get(admin_page))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_mw::basic_auth,
+        ));
+
+    let prep_api = axum::Router::new()
+        .route("/api/prep/claim", get(api::prep_claim))
+        .route("/api/prep/{id}/result", post(api::prep_result))
+        .route("/api/prep/{id}/fail", post(api::task_fail))
+        .route("/api/prep/search", get(api::prep_search))
+        .route("/api/transcribe/claim", get(api::transcribe_claim))
+        .route("/api/transcribe/{id}/result", post(api::transcribe_result))
+        .route("/api/transcribe/{id}/fail", post(api::task_fail))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_mw::preparer_auth,
         ));
 
     let collector_cors = CorsLayer::new()
@@ -70,8 +99,10 @@ pub fn router(state: AppState) -> axum::Router {
 
     axum::Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/", get(|| async { axum::response::Redirect::temporary("/admin") }))
         .merge(collector_source)
         .merge(panel)
+        .merge(prep_api)
         .merge(collector_api)
         .with_state(state)
 }

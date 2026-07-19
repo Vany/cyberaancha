@@ -24,18 +24,22 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [x] deployed to n1; panel + endpoints live; admin/collector creds provisioned
 - [ ] **first real wave on @vanyserezhkin — blocked on public HTTPS** (DNS + nginx/certbot); browser→localhost is gated by Chrome LNA, so needs the real endpoint. Harvest mechanics verified in-browser (research/youtube-structure-2026-07.md)
 
-## P3 — harvest completeness
-- [ ] schemas + collector: harvest_comments (/next continuations), harvest_chat (get_live_chat_replay)
-- [ ] comment/chat storage; professor-authored detection (authorChannelId)
+## P3 — harvest completeness ✅
+- [x] schemas + collector: harvest_comments (/next continuations), harvest_chat (get_live_chat_replay)
+- [x] comment/chat storage (migration 003); professor-authored detection (authorChannelId == channel_id)
 
 ## P4 — preparer loop + KB + index
-- [ ] schemas: transcribe, extract, integrate; prompts/extract.md, prompts/integrate.md; PREP.md playbook
-- [ ] scripts/transcribe_pending.sh (yt-dlp audio → whisper.cpp turbo q5_0; install whisper-cpp + model)
-- [ ] KB tables: articles, facts, stances, aliases, links, qa_pairs, people, questions
-- [ ] integrate path: serialized, contradictions → questions, watermark advance
-- [ ] tantivy: articles + transcripts indexes, RU stemmer, atomic swap rebuild
-- [ ] answer engine + /api/test-query
-- [ ] run full loop on the harvested week; iterate prompt quality
+- [x] schemas: integrate (envelope: articles+questions), transcribe
+- [x] KB tables (migration 004): articles, aliases, stances, facts, links, questions, queries
+- [x] integrate: serialized claim, bundle (transcript+comments+chat), upsert articles, questions, needs_transcription→transcribe spawn, mark integrated (migration 005)
+- [x] tantivy: articles index, RU Snowball stemmer, delete-all+refill atomic rebuild, boosts (title×3, aliases×2.5, story×0.7)
+- [x] answer engine + /api/test-query (≤5 links, newest-first, disclaimer, honest miss + query log)
+- [x] preparer + panel endpoints: prep claim/result/search, transcribe claim/result, articles search/get/put, questions list/answer, process/enqueue
+- [x] 12 tests incl. full harvest→integrate→reindex→answer + needs_transcription→transcribe→reintegrate
+- [ ] prompts/integrate.md + PREP.md playbook (the Claude-session instructions)
+- [ ] scripts/transcribe_pending.sh (yt-dlp audio → whisper.cpp; install whisper-cpp + model)
+- [ ] run full loop on a real harvested week; iterate prompt quality
+- Note: extract+integrate collapsed into one `integrate` pass (MEMO); RU stemming imperfect → aliases carry inflections (research/)
 
 ## P5 — admin panel
 - [ ] SPA shell, auth, tabs: Search/Browse, Article (view/edit), Questions, Test, Sources, System (clocks, queue, collector launcher, MCP info, backups)

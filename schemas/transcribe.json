@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "transcribe result — Whisper segments from the Mac script",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["yt_id", "lang", "segments"],
+  "properties": {
+    "yt_id": { "type": "string", "pattern": "^[0-9A-Za-z_-]{11}$" },
+    "lang": { "type": "string", "maxLength": 10 },
+    "model": { "type": "string", "maxLength": 60 },
+    "segments": {
+      "type": "array",
+      "maxItems": 200000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["t_ms", "text"],
+        "properties": {
+          "t_ms": { "type": "integer", "minimum": 0 },
+          "d_ms": { "type": ["integer", "null"], "minimum": 0 },
+          "text": { "type": "string", "maxLength": 2000 }
+        }
+      }
+    }
+  }
+}

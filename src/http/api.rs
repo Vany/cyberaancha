@@ -2,12 +2,19 @@
 
 use super::AppState;
 use crate::auth::Role;
-use crate::{backup, db, queue};
+use crate::{answer, backup, db, kb, queue};
 use axum::Extension;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use serde::Deserialize;
 use serde_json::{Value, json};
+
+#[derive(Deserialize)]
+pub struct QueryText {
+    #[serde(default)]
+    pub q: String,
+}
 
 /// System-tab heartbeat: clocks, watermarks, queue counts. Grows with phases.
 pub async fn state(State(st): State<AppState>, Extension(role): Extension<Role>) -> Response {
@@ -124,6 +131,214 @@ pub async fn task_fail(
 
 fn bad_request(e: anyhow::Error) -> Response {
     (StatusCode::BAD_REQUEST, format!("{e:#}")).into_response()
+}
+
+fn unprocessable(task: i64, e: anyhow::Error) -> Response {
+    tracing::warn!(task, error = %format!("{e:#}"), "submission rejected");
+    (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:#}")).into_response()
+}
+
+// ---- preparer / KB (P4) ----------------------------------------------------
+
+/// Admin: enqueue integrate tasks for harvested-but-unintegrated videos.
+pub async fn process_enqueue(
+    State(st): State<AppState>,
+    Extension(role): Extension<Role>,
+) -> Response {
+    if role != Role::Admin {
+        return (StatusCode::FORBIDDEN, "admin only").into_response();
+    }
+    match st.db.call(|c| queue::enqueue_integrate(c)).await {
+        Ok(v) => axum::Json(v).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// Preparer: claim the one active integrate task, with the full video bundle.
+pub async fn prep_claim(State(st): State<AppState>) -> Response {
+    match st.db.call(|c| queue::claim_integrate(c)).await {
+        Ok(Some(task)) => axum::Json(json!({ "task": task })).into_response(),
+        Ok(None) => axum::Json(json!({ "task": Value::Null })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// Preparer: submit an integrate result; rebuild the index if the KB changed.
+pub async fn prep_result(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    axum::Json(result): axum::Json<Value>,
+) -> Response {
+    let outcome = st.db.call(move |c| queue::submit_integrate(c, id, &result)).await;
+    match outcome {
+        Ok(o) => {
+            if o.reindex {
+                if let Err(e) = super::reindex(&st).await {
+                    return internal(e);
+                }
+            }
+            axum::Json(o.summary).into_response()
+        }
+        Err(e) => unprocessable(id, e),
+    }
+}
+
+/// Preparer: search existing articles to decide create-vs-merge.
+pub async fn prep_search(State(st): State<AppState>, Query(p): Query<QueryText>) -> Response {
+    articles_search(State(st), Query(p)).await
+}
+
+pub async fn transcribe_claim(State(st): State<AppState>) -> Response {
+    match st.db.call(|c| queue::claim_transcribe(c)).await {
+        Ok(v) => axum::Json(json!({ "task": v })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+pub async fn transcribe_result(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    axum::Json(result): axum::Json<Value>,
+) -> Response {
+    match st.db.call(move |c| queue::submit_transcribe(c, id, &result)).await {
+        Ok(v) => axum::Json(v).into_response(),
+        Err(e) => unprocessable(id, e),
+    }
+}
+
+/// Panel/test tab and (later) the TG bot share this exact answer engine.
+pub async fn test_query(State(st): State<AppState>, axum::Json(body): axum::Json<QueryText>) -> Response {
+    if body.q.trim().is_empty() {
+        return bad_request(anyhow::anyhow!("empty query"));
+    }
+    let idx = st.index.clone();
+    match st.db.call(move |c| answer::answer(c, &idx, &body.q)).await {
+        Ok(a) => axum::Json(a).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// Search articles; returns slug + title + score for the panel and preparer.
+pub async fn articles_search(State(st): State<AppState>, Query(p): Query<QueryText>) -> Response {
+    if p.q.trim().is_empty() {
+        return axum::Json(json!({ "results": [] })).into_response();
+    }
+    let idx = st.index.clone();
+    let hits = match idx.search(&p.q, 20) {
+        Ok(h) => h,
+        Err(e) => return internal(e),
+    };
+    let result = st
+        .db
+        .call(move |c| {
+            let mut out = vec![];
+            for h in hits {
+                let title: Option<String> = c
+                    .query_row("SELECT title FROM articles WHERE slug = ?1", [&h.slug], |r| r.get(0))
+                    .ok();
+                out.push(json!({ "slug": h.slug, "title": title, "score": h.score }));
+            }
+            Ok(Value::Array(out))
+        })
+        .await;
+    match result {
+        Ok(results) => axum::Json(json!({ "results": results })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+pub async fn article_get(State(st): State<AppState>, Path(slug): Path<String>) -> Response {
+    match st.db.call(move |c| kb::get_article(c, &slug)).await {
+        Ok(Some(a)) => axum::Json(a).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "no such article").into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// Owner inline-edit (SPEC §10): the professor's edit is authoritative. Body is
+/// a full ArticleInput; path slug must match. Reindexes on success.
+pub async fn article_put(
+    State(st): State<AppState>,
+    Extension(role): Extension<Role>,
+    Path(slug): Path<String>,
+    axum::Json(input): axum::Json<kb::ArticleInput>,
+) -> Response {
+    if role != Role::Owner && role != Role::Admin {
+        return (StatusCode::FORBIDDEN, "owner or admin only").into_response();
+    }
+    if input.slug != slug {
+        return bad_request(anyhow::anyhow!("body slug {:?} != path {:?}", input.slug, slug));
+    }
+    if let Err(e) = st.db.call(move |c| kb::upsert_article(c, &input)).await {
+        return bad_request(e);
+    }
+    match super::reindex(&st).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+pub async fn questions_list(State(st): State<AppState>) -> Response {
+    let result = st
+        .db
+        .call(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, article_slug, context, question, status, created_at
+                 FROM questions WHERE status = 'open' ORDER BY id DESC LIMIT 500",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(json!({
+                        "id": r.get::<_, i64>(0)?,
+                        "article_slug": r.get::<_, Option<String>>(1)?,
+                        "context": r.get::<_, String>(2)?,
+                        "question": r.get::<_, String>(3)?,
+                        "status": r.get::<_, String>(4)?,
+                        "created_at": r.get::<_, String>(5)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(Value::Array(rows))
+        })
+        .await;
+    match result {
+        Ok(questions) => axum::Json(json!({ "questions": questions })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct AnswerBody {
+    pub answer: String,
+}
+
+/// The professor answers a question — becomes a top-authority fact next integrate.
+pub async fn question_answer(
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    axum::Json(body): axum::Json<AnswerBody>,
+) -> Response {
+    if body.answer.trim().is_empty() {
+        return bad_request(anyhow::anyhow!("empty answer"));
+    }
+    let result = st
+        .db
+        .call(move |c| {
+            let n = c.execute(
+                "UPDATE questions SET answer = ?2, status = 'answered', answered_at = ?3
+                 WHERE id = ?1 AND status = 'open'",
+                rusqlite::params![id, body.answer, jiff::Timestamp::now().to_string()],
+            )?;
+            if n == 0 {
+                anyhow::bail!("no open question {id}");
+            }
+            Ok(())
+        })
+        .await;
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => bad_request(e),
+    }
 }
 
 pub async fn backups_list(State(st): State<AppState>) -> Response {

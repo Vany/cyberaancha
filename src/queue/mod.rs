@@ -3,6 +3,11 @@
 //! The server stays dumb-but-strict: every submission is validated against
 //! schemas/ and applied by deterministic code — reject, don't repair.
 
+mod prep;
+pub use prep::{
+    claim_integrate, claim_transcribe, enqueue_integrate, submit_integrate, submit_transcribe,
+};
+
 use crate::config::Config;
 use crate::db;
 use anyhow::{Context, Result, bail};
@@ -11,15 +16,15 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
 
-const LEASE_MINUTES: i64 = 30;
-const MAX_ATTEMPTS: i64 = 5;
+pub(super) const LEASE_MINUTES: i64 = 30;
+pub(super) const MAX_ATTEMPTS: i64 = 5;
 /// Cap of per-video task pairs created from one discover submission.
 const WAVE_CAP: usize = 60;
 
 /// Schemas are compiled once; adding a task type means adding a schema here.
 static VALIDATORS: OnceLock<Vec<(&'static str, jsonschema::Validator)>> = OnceLock::new();
 
-fn validator(task_type: &str) -> Result<&'static jsonschema::Validator> {
+pub(super) fn validator(task_type: &str) -> Result<&'static jsonschema::Validator> {
     let all = VALIDATORS.get_or_init(|| {
         [
             ("discover", include_str!("../../schemas/discover.json")),
@@ -27,6 +32,8 @@ fn validator(task_type: &str) -> Result<&'static jsonschema::Validator> {
             ("harvest_captions", include_str!("../../schemas/harvest_captions.json")),
             ("harvest_comments", include_str!("../../schemas/harvest_comments.json")),
             ("harvest_chat", include_str!("../../schemas/harvest_chat.json")),
+            ("integrate", include_str!("../../schemas/integrate.json")),
+            ("transcribe", include_str!("../../schemas/transcribe.json")),
         ]
         .into_iter()
         .map(|(name, src)| {

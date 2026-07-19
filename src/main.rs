@@ -1,10 +1,13 @@
 //! aancha-server — CLI dispatch only (PROG.md layout). Everything real lives in modules.
 
+mod answer;
 mod auth;
 mod backup;
 mod config;
 mod db;
 mod http;
+mod index;
+mod kb;
 mod queue;
 mod raw;
 
@@ -122,11 +125,18 @@ async fn serve(cfg: config::Config, config_path: PathBuf) -> Result<()> {
 
     tokio::spawn(backup::daily_loop(db.clone(), cfg.clone(), config_path.clone()));
 
+    // Open and warm the search index from the DB (derivable — safe to wipe/rebuild).
+    let index = Arc::new(index::SearchIndex::open(&cfg.server.index_dir, cfg.index.writer_heap_mb)?);
+    let docs = db.with(|c| kb::index_docs(c))?;
+    let n = index.rebuild(&docs)?;
+    tracing::info!(articles = n, "search index ready");
+
     let state = http::AppState {
         db,
         cfg: cfg.clone(),
         config_path: Arc::new(config_path),
         basic_cache: Default::default(),
+        index,
     };
     let app = http::router(state);
 

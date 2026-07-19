@@ -2,6 +2,18 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — P4 built: KB + tantivy + answer engine + preparer pipeline
+
+- `src/kb` (articles/aliases/stances/facts/links/questions, upsert + tx variant + reads), `src/index` (tantivy 0.26, RU Snowball, delete-all+refill rebuild atomic at commit, boosts), `src/answer` (query→search→templated RU reply, ≤5 links newest-first, disclaimer, honest miss + `queries` log), `src/queue/prep` (serialized integrate with full video bundle, transcribe worker). Migrations 004 (KB) + 005 (integrated/transcribe_state flags).
+- **integrate collapses SPEC extract+integrate into one Claude pass** keyed by video — simpler for the session model; separate batched extract can slot in later. needs_transcription verdict spawns a transcribe task (self-healing captions).
+- Endpoints: /api/test-query, /api/articles (search/get/put owner-edit), /api/questions (list/answer), /api/process/enqueue, /api/prep/* (claim/result/search), /api/transcribe/* — preparer bearer.
+- **Real findings (research/):** (1) tantivy 0.26 needs `TopDocs::with_limit(n).order_by_score()`; (2) Snowball RU does NOT unify all cases (геморрой→геморр vs геморроя→геморро) — aliases MUST carry inflected forms, key instruction for the integrate prompt; (3) BM25 IDF collapses on tiny corpora → absolute score floor isn't robust, set permissive 0.1, tune from miss-log. 12 tests green, 0 warnings.
+- Whisper NOT run yet (transcribe script + whisper-cpp install pending). Prompts/PREP playbook pending.
+
+## 2026-07-19 — TLS live on youtube.serezhkin.com
+
+- certbot issued the cert (per-host, HTTP-01) after the DNS negative-cache (900s SOA min) expired. Root cause of the earlier certbot failure was purely that stale NXDOMAIN, not config. HTTPS chain verified: /healthz 200, /admin 401→200. nginx vhost symlinked to ~vany/aancha/nginx-aancha.conf (deploy never clobbers it). Auto-renew armed (certbot.timer). `/` was a bare 404 → added redirect to /admin.
+
 ## 2026-07-19 — P2 built and deployed: queue + collector + panel
 
 - Queue engine (`src/queue`): idempotent wave enqueue (7-day windows, back/forward direction), lease-based claim (30 min, 5 attempts), submit validated against `schemas/*.json` (compiled once via OnceLock) and applied in one transaction, watermarks (wm_oldest/wm_newest) advance when the wave drains. Migration 002: videos, tasks (UNIQUE type+subject), raw_docs (zstd), transcripts (zstd).

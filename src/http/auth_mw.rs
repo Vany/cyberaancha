@@ -114,9 +114,13 @@ async fn reject(user: &str) -> Response {
 }
 
 /// Bearer auth for the collector edge; token hashes live in the DB auth table.
-/// preparer/mcp variants arrive with their phases as equally thin wrappers.
 pub async fn collector_auth(state: State<AppState>, req: Request, next: Next) -> Response {
     check_bearer(state, req, next, "collector").await
+}
+
+/// Bearer auth for the preparer edge (integrate + transcribe workers on the Mac).
+pub async fn preparer_auth(state: State<AppState>, req: Request, next: Next) -> Response {
+    check_bearer(state, req, next, "preparer").await
 }
 
 async fn check_bearer(
