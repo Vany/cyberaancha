@@ -61,24 +61,16 @@ pub struct ClaimedTask {
     pub input: Value,
 }
 
-/// Admin action: start a harvest wave. Idempotent while a discover task is open.
+/// Admin action: (re)start a harvest wave. Always resets the discover task to
+/// pending — clicking "gather" again restarts a wave that stalled (e.g. a
+/// collector that errored mid-run and left the task leased). discover is
+/// idempotent (upserts videos), so a redundant re-trigger is harmless.
 pub fn enqueue_wave(conn: &Connection, cfg: &Config, direction: &str) -> Result<Value> {
     if !["back", "forward"].contains(&direction) {
         bail!("direction must be 'back' or 'forward'");
     }
     db::meta_set(conn, "wave_direction", direction)?;
     let now = Timestamp::now().to_string();
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT state FROM tasks WHERE type = 'discover' AND subject = ?1
-             AND state IN ('pending', 'claimed')",
-            [&cfg.channel.handle],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if let Some(state) = existing {
-        return Ok(json!({ "discover": state, "note": "wave already open" }));
-    }
     conn.execute(
         "INSERT INTO tasks (type, subject, state, created_at) VALUES ('discover', ?1, 'pending', ?2)
          ON CONFLICT(type, subject) DO UPDATE SET
@@ -86,7 +78,7 @@ pub fn enqueue_wave(conn: &Connection, cfg: &Config, direction: &str) -> Result<
              attempt = 0, done_at = NULL, created_at = excluded.created_at",
         params![cfg.channel.handle, now],
     )?;
-    Ok(json!({ "discover": "enqueued" }))
+    Ok(json!({ "discover": "enqueued", "direction": direction }))
 }
 
 /// Atomic claim with lease; expired leases are reclaimable. Over-attempted
@@ -575,9 +567,9 @@ mod tests {
         let cfg = cfg();
         db.with(|c| {
             enqueue_wave(c, &cfg, "back")?;
-            // Idempotent while open.
+            // Re-triggering restarts the wave (resets discover to pending).
             let again = enqueue_wave(c, &cfg, "back")?;
-            assert_eq!(again["note"], "wave already open");
+            assert_eq!(again["discover"], "enqueued");
 
             let claimed = claim(c, &cfg, "collector", 10)?;
             assert_eq!(claimed.len(), 1);

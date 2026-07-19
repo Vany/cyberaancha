@@ -52,30 +52,20 @@
 
   const ytcfgGet = (key) => window.ytcfg && window.ytcfg.get ? window.ytcfg.get(key) : null;
 
-  // SAPISIDHASH lets innertube see the logged-in session (owner data later);
-  // logged-out pages simply have no SAPISID and we skip the header.
-  const sapisidHash = async () => {
-    const m = document.cookie.match(/(?:^|;\s*)(?:__Secure-3P)?SAPISID=([^;]+)/);
-    if (!m) return null;
-    const ts = Math.floor(Date.now() / 1000);
-    const data = new TextEncoder().encode(`${ts} ${m[1]} ${location.origin}`);
-    const digest = await crypto.subtle.digest("SHA-1", data);
-    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-    return `SAPISIDHASH ${ts}_${hex}`;
-  };
-
+  // Everything we harvest is PUBLIC (videos, captions, comments, chat replays),
+  // so we deliberately do NOT use the logged-in session: `credentials: "omit"`
+  // makes every request behave exactly like a logged-out browser (the path we
+  // verified works). Sending a SAPISIDHASH auth header on a logged-in session
+  // was breaking these public calls — losing everything. Owner-only/private data
+  // (P7) will opt back into the session behind a flag; public harvest never needs it.
   const innertube = async (endpoint, body) => {
     await pace();
     const ctx = ytcfgGet("INNERTUBE_CONTEXT");
     if (!ctx) throw new Error("no INNERTUBE_CONTEXT on this page — open any watch/channel page");
-    const auth = await sapisidHash();
     const res = await fetch(`${location.origin}/youtubei/v1/${endpoint}?prettyPrint=false`, {
       method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "content-type": "application/json",
-        ...(auth ? { authorization: auth, "x-origin": location.origin } : {}),
-      },
+      credentials: "omit",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ context: ctx, ...body }),
     });
     if (!res.ok) throw new Error(`innertube ${endpoint} -> ${res.status}`);
@@ -84,7 +74,7 @@
 
   const fetchPage = async (path) => {
     await pace();
-    const res = await fetch(location.origin + path, { credentials: "same-origin" });
+    const res = await fetch(location.origin + path, { credentials: "omit" });
     if (!res.ok) throw new Error(`page ${path} -> ${res.status}`);
     return res.text();
   };
@@ -180,9 +170,13 @@
       parseLockups(data, kind, seen, videos);
       let tokens = deepFind(data, "continuationCommand").map((c) => c.token).filter(Boolean);
       // Walk continuations until the tab is exhausted (whole listing is cheap).
+      // A failed continuation must NOT discard the videos already found — keep
+      // what we have and move on (page 1 alone is a usable result).
       while (tokens.length && !window.AANCHA_STOP) {
         say(`discover: /${tab} … ${seen.size} items`);
-        const page = await innertube("browse", { continuation: tokens[0] });
+        let page;
+        try { page = await innertube("browse", { continuation: tokens[0] }); }
+        catch (e) { console.warn("aancha: discover continuation stopped", e); break; }
         const before = videos.length;
         parseLockups(page, kind, seen, videos);
         tokens = deepFind(page, "continuationCommand").map((c) => c.token).filter(Boolean);
@@ -225,7 +219,7 @@
     await pace();
     const url = new URL(track.baseUrl, location.origin);
     url.searchParams.set("fmt", "json3");
-    const res = await fetch(url, { credentials: "same-origin" });
+    const res = await fetch(url, { credentials: "omit" });
     if (!res.ok) throw new Error(`timedtext -> ${res.status}`);
     const j3 = await res.json();
     const segments = (j3.events || [])
@@ -297,7 +291,9 @@
     const comments = [], seen = new Set(), replyThreads = [];
     let guard = 0;
     while (token && !window.AANCHA_STOP && guard++ < 100000) {
-      const page = await innertube("next", { continuation: token });
+      let page;
+      try { page = await innertube("next", { continuation: token }); }
+      catch (e) { console.warn("aancha: comments continuation stopped", e); break; }
       collectComments(page, null, seen, comments);
       for (const thread of deepFind(page, "commentThreadRenderer")) {
         const parentId = deepFind(thread, "commentId")[0] ||
@@ -313,7 +309,9 @@
       if (window.AANCHA_STOP) break;
       let t = rt, g2 = 0;
       while (t && g2++ < 1000) {
-        const page = await innertube("next", { continuation: t });
+        let page;
+        try { page = await innertube("next", { continuation: t }); }
+        catch (e) { console.warn("aancha: reply continuation stopped", e); break; }
         collectComments(page, parentId, seen, comments);
         t = sectionNextToken(page);
       }
@@ -333,7 +331,9 @@
     const messages = [], seen = new Set();
     let guard = 0;
     while (cont && !window.AANCHA_STOP && guard++ < 200000) {
-      const page = await innertube("live_chat/get_live_chat_replay", { continuation: cont });
+      let page;
+      try { page = await innertube("live_chat/get_live_chat_replay", { continuation: cont }); }
+      catch (e) { console.warn("aancha: chat continuation stopped", e); break; }
       const lcc = deepFind(page, "liveChatContinuation")[0];
       if (!lcc) break;
       for (const action of lcc.actions || []) {
