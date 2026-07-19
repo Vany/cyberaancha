@@ -239,20 +239,39 @@ impl CyberaanchaMcp {
         description = "Claim the next un-integrated video and return its full bundle: metadata, transcript (segments with t_ms timestamps), comments (professor's replies flagged is_author), and her chat messages. Categorize it into KB articles, then call submit_articles. Returns {\"done\":true} when none remain. Serialized — one active at a time. Follow the 'integrate' MCP prompt for the method."
     )]
     async fn next_unprocessed_video(&self) -> Result<String, McpError> {
-        let out = self
+        // On no-claim, distinguish "truly done" from "blocked by another active
+        // integrate" — claim_integrate returns None for both, but a caller must
+        // retry on the latter, not stop.
+        let (claimed, backlog) = self
             .db
             .call(|c| {
                 queue::enqueue_integrate(c)?; // idempotent: schedule any newly-ready videos
-                queue::claim_integrate(c)
+                let claimed = queue::claim_integrate(c)?;
+                let backlog: i64 = if claimed.is_none() {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM tasks WHERE type='integrate' AND state IN ('claimed','pending')",
+                        [],
+                        |r| r.get(0),
+                    )?
+                } else {
+                    0
+                };
+                Ok((claimed, backlog))
             })
             .await
             .map_err(oops)?;
-        match out {
+        match claimed {
             Some(task) => Ok(json!({
                 "task_id": task.id,
                 "video": task.subject,
                 "bundle": task.bundle,
                 "next": "Search the KB (search_articles) before creating; merge into existing slugs when a topic matches. Emit inflected/colloquial/latin aliases. Then submit_articles(task_id, result_json).",
+            })
+            .to_string()),
+            None if backlog > 0 => Ok(json!({
+                "blocked": true,
+                "queued": backlog,
+                "note": "another integrate is in progress (serialized); retry shortly",
             })
             .to_string()),
             None => Ok(json!({ "done": true, "note": "no videos ready to process" }).to_string()),
