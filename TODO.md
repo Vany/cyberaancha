@@ -16,12 +16,13 @@ Findings in `research/p0-findings.md`, summary in MEMO.md.
 - [ ] smoke: `https://aancha.serezhkin.com/healthz` green
 
 ## P2 — queue + collector (first harvest)
-- [ ] task engine: claim w/ lease, submit w/ jsonschema validation, fail/retry, wave enqueue (window_days)
-- [ ] schemas: discover, harvest_meta, harvest_captions
-- [ ] `videos` + raw storage tables (zstd blobs)
-- [ ] collector.js: ytcfg reader, discover (browse tabs), captions (get_transcript→captionTracks→player), meta; pacing; token
-- [ ] bookmarklet builder + snippet copy in minimal System tab; **test bookmarklet vs snippet on youtube.com**
-- [ ] first wave on @vanyserezhkin (one week window) end-to-end
+- [x] task engine: claim w/ lease, submit w/ jsonschema validation, fail/retry, wave enqueue (window_days, back/forward)
+- [x] schemas: discover, harvest_meta, harvest_captions (single source of truth, compiled once)
+- [x] `videos` + `tasks` + `raw_docs` (zstd) + `transcripts` tables (migration 002)
+- [x] collector.js: ytcfg reader, discover (lockupViewModel + browse continuations), captions (player→captionTracks→json3), meta, SAPISIDHASH, pacing; token from panel
+- [x] bookmarklet builder + snippet copy in minimal /admin; CORS+PNA for youtube.com
+- [x] deployed to n1; panel + endpoints live; admin/collector creds provisioned
+- [ ] **first real wave on @vanyserezhkin — blocked on public HTTPS** (DNS + nginx/certbot); browser→localhost is gated by Chrome LNA, so needs the real endpoint. Harvest mechanics verified in-browser (research/youtube-structure-2026-07.md)
 
 ## P3 — harvest completeness
 - [ ] schemas + collector: harvest_comments (/next continuations), harvest_chat (get_live_chat_replay)

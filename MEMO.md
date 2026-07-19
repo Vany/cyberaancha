@@ -2,6 +2,14 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — P2 built and deployed: queue + collector + panel
+
+- Queue engine (`src/queue`): idempotent wave enqueue (7-day windows, back/forward direction), lease-based claim (30 min, 5 attempts), submit validated against `schemas/*.json` (compiled once via OnceLock) and applied in one transaction, watermarks (wm_oldest/wm_newest) advance when the wave drains. Migration 002: videos, tasks (UNIQUE type+subject), raw_docs (zstd), transcripts (zstd).
+- Collector (`collector/collector.js`): pure-fetch page-context. **Verified live in Chrome against @vanyserezhkin** — YouTube moved channel tabs to `lockupViewModel` (videoRenderer gone); rewrote parsing (details in research/youtube-structure-2026-07.md). player endpoint + publishDate confirmed. Bookmarklet (fetch source → Trusted-Types policy → eval) and console snippet, both built in /admin from a pasted collector token.
+- Gotcha that shaped testing: recent Chrome gates HTTPS-page→127.0.0.1 behind Local Network Access permission → **can't drive browser→localhost POST in dev**; irrelevant in prod (both public HTTPS). Server round-trip proven by unit tests + curl; panel rendered + screenshotted.
+- Deployed to n1 (4f92493). Bootstrap creds set (admin pw + collector token) — **rotate before public exposure**. jsonschema pulled default-features=false to stay lean.
+- **First real harvest blocked on public HTTPS**: needs Vany's DNS A-record + `sudo` nginx/certbot (deploy/README.md). Until then /admin reachable only via `ssh -L 8087:127.0.0.1:8087 n1`.
+
 ## 2026-07-19 — P1 built and deployed (TLS pending Vany)
 
 - Server core: db (single-conn mutex, `call`/`with`, user_version migrations), auth (argon2 0.5, blake3 tokens `aancha-<purpose>-<hex>`, rotation invalidates), basic-auth middleware (username = role; 10-min verify cache; 250 ms brake), backup (VACUUM INTO → tar.gz, prune keep-N, daily tokio loop, restore with listen-guard + pre-restore copy), /api/state + /api/backups.
