@@ -241,4 +241,4 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - 2026-07-19 — Mac-side split: mechanical tasks (transcribe) = unattended shell scripts; judgment tasks (extract/integrate) = Claude sessions. — *(V+C)*
 - 2026-07-19 — Harvest is **time-windowed** (default 7 days per wave), not video-counted; two watermarks (oldest/newest). — *(V+C)*
 - 2026-07-19 — Secrets in DB (auth table), config secret-free; argon2 stable 0.5 (0.6 still RC). — *(C)*
-- 2026-07-19 — Code hosted at github.com/Vany/cyberaancha, **private-first** (repo documents Vany's server profile + session-side harvesting mechanics tied to the professor's name; flipping public is one command later, the reverse isn't). — *(V+C)*
+- 2026-07-19 — Code hosted at github.com/Vany/cyberaancha, private-first. — *(V+C)* **Superseded same day: repo is public** (V's call); history audited clean before the flip; secrets hygiene codified in PROG.md. — *(V)*

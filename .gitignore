@@ -1,3 +1,4 @@
+# Public repo: nothing secret-bearing may ever land here (PROG.md "Secrets").
 /target
 /data
 /index
@@ -6,6 +7,13 @@
 *.db
 *.db-wal
 *.db-shm
+*.pre-restore-*
+*.tar.gz
+*.pem
+*.key
 .env
+.env.*
+secrets*
+.claude/settings.local.json
 .DS_Store
 aancha.toml
