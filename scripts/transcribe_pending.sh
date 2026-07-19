@@ -29,11 +29,12 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 process_one() {
-  local claim id yt_id url wav out_json result_json
+  local claim id yt_id url wav out_json result_json force_whisper
   claim="$(curl -fsS -H "$AUTH" "$AANCHA_SERVER/api/transcribe/claim")" || return 1
   [ "$(jq -r '.task' <<<"$claim")" = "null" ] && return 2   # nothing to do
   id="$(jq -r '.task.id' <<<"$claim")"
   yt_id="$(jq -r '.task.yt_id' <<<"$claim")"
+  force_whisper="$(jq -r '.task.whisper // false' <<<"$claim")"  # set when integrate rejected auto-captions
   url="https://www.youtube.com/watch?v=${yt_id}"
   wav="$work/${yt_id}.wav"
   out_json="$work/${yt_id}"          # whisper appends .json
@@ -51,11 +52,17 @@ process_one() {
 
   # --- Captions-first: yt-dlp auto-captions (fast, free, accurate). YouTube walls
   # browser caption fetching behind poToken, but yt-dlp handles it. Whisper only
-  # when no captions exist. ---
-  yt-dlp -q --no-warnings --skip-download --write-auto-subs --write-subs \
-    --sub-langs "${WHISPER_LANG},en" --sub-format json3 \
-    -o "$work/${yt_id}.%(ext)s" "$url" 2>"$work/sub.err" || true
-  local sub; sub="$(ls "$work/${yt_id}."*".json3" 2>/dev/null | sort | head -1)"
+  # when there are no captions, OR when integrate judged the captions not good
+  # enough (force_whisper) — in which case skip subs and transcribe the audio. ---
+  local sub=""
+  if [ "$force_whisper" != "true" ]; then
+    yt-dlp -q --no-warnings --skip-download --write-auto-subs --write-subs \
+      --sub-langs "${WHISPER_LANG},en" --sub-format json3 \
+      -o "$work/${yt_id}.%(ext)s" "$url" 2>"$work/sub.err" || true
+    sub="$(ls "$work/${yt_id}."*".json3" 2>/dev/null | sort | head -1)"
+  else
+    echo "  captions rejected upstream → forcing whisper"
+  fi
   if [ -n "$sub" ] && [ -s "$sub" ]; then
     local sublang; sublang="$(basename "$sub" | sed -E "s/^${yt_id}\.([^.]+)\.json3$/\1/")"
     jq -c --arg yt "$yt_id" --arg lang "$sublang" \

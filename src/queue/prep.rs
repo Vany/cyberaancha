@@ -208,9 +208,13 @@ pub fn submit_integrate(conn: &mut Connection, task_id: i64, result: &Value) -> 
     // needs_transcription: no KB write; spawn a transcribe task and finish.
     if result["needs_transcription"].as_bool() == Some(true) {
         tx.execute("UPDATE videos SET transcribe_state = 'pending' WHERE yt_id = ?1", [&subject])?;
+        // Force Whisper this time — the auto-captions were judged not good enough,
+        // so re-fetching the same yt-dlp subs would just repeat the bad result.
         tx.execute(
-            "INSERT INTO tasks (type, subject, state, created_at) VALUES ('transcribe', ?1, 'pending', ?2)
-             ON CONFLICT(type, subject) DO UPDATE SET state = 'pending', attempt = 0, error = NULL",
+            "INSERT INTO tasks (type, subject, state, payload_json, created_at)
+             VALUES ('transcribe', ?1, 'pending', '{\"whisper\":true}', ?2)
+             ON CONFLICT(type, subject) DO UPDATE SET state = 'pending', attempt = 0,
+                 error = NULL, payload_json = '{\"whisper\":true}'",
             params![subject, Timestamp::now().to_string()],
         )?;
         tx.execute("UPDATE tasks SET state = 'done', done_at = ?1 WHERE id = ?2",
@@ -259,17 +263,25 @@ pub fn claim_transcribe(conn: &Connection) -> Result<Option<Value>> {
     let now = Timestamp::now();
     let lease = now.checked_add(LEASE_MINUTES.minutes()).context("lease overflow")?.to_string();
     let now_s = now.to_string();
-    let claimed: Option<(i64, String)> = conn
+    let claimed: Option<(i64, String, Option<String>)> = conn
         .query_row(
             "UPDATE tasks SET state = 'claimed', lease_until = ?1, claimed_by = 'transcriber', attempt = attempt + 1
              WHERE id = (SELECT id FROM tasks WHERE type = 'transcribe'
                          AND (state = 'pending' OR (state = 'claimed' AND lease_until < ?2)) ORDER BY id LIMIT 1)
-             RETURNING id, subject",
+             RETURNING id, subject, payload_json",
             params![lease, now_s],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
-    Ok(claimed.map(|(id, yt_id)| json!({ "id": id, "yt_id": yt_id })))
+    Ok(claimed.map(|(id, yt_id, payload)| {
+        // `whisper: true` (set when integrate rejected the auto-captions) tells the
+        // Mac to skip yt-dlp subs and transcribe the audio directly.
+        let whisper = payload
+            .and_then(|p| serde_json::from_str::<Value>(&p).ok())
+            .and_then(|v| v["whisper"].as_bool())
+            .unwrap_or(false);
+        json!({ "id": id, "yt_id": yt_id, "whisper": whisper })
+    }))
 }
 
 pub fn submit_transcribe(conn: &Connection, task_id: i64, result: &Value) -> Result<Value> {
@@ -444,6 +456,7 @@ mod tests {
             assert!(!out.reindex);
             let tj2 = claim_transcribe(c)?.expect("a re-transcribe task");
             assert_eq!(tj2["yt_id"], "nocapvideo1");
+            assert_eq!(tj2["whisper"], true); // re-transcribe forces whisper (subs were bad)
 
             // Whisper returns better segments; video reopens for integration.
             submit_transcribe(c, tj2["id"].as_i64().unwrap(), &json!({ "yt_id": "nocapvideo1",

@@ -15,6 +15,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("003_comments_chat", include_str!("migrations/003_comments_chat.sql")),
     ("004_kb", include_str!("migrations/004_kb.sql")),
     ("005_integrate", include_str!("migrations/005_integrate.sql")),
+    ("006_task_payload", include_str!("migrations/006_task_payload.sql")),
 ];
 
 pub const DB_FILE: &str = "aancha.db";
