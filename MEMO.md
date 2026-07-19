@@ -2,6 +2,13 @@
 
 Newest first. One entry per finished task.
 
+## 2026-07-19 — project renamed to cyberaancha
+
+- Sweep: aancha→cyberaancha across code/scripts/config/docs, guarded to keep hostnames (aancha.serezhkin.com, youtube.serezhkin.com) and avoid double-replace. Binary cyberaancha-server, package cyberaancha-server, token prefix cyberaancha-<purpose>-, CYBERAANCHA_* env/JS-globals, MCP server name+key "cyberaancha", brand fallback "cyberaancha", DB cyberaancha.db, config cyberaancha.toml, deploy dir ~vany/cyberaancha, nginx-cyberaancha.conf. Renamed files via git mv.
+- **n1 migrated preserving data**: stopped old container, cp -r ~/aancha ~/cyberaancha (kept ~/aancha so the nginx symlink target survives — no sudo needed), renamed config + cyberaancha.db inside, redeployed. Verified over HTTPS: 1341 videos / 58 transcripts / ATM11 article all intact, MCP 200 with fresh cyberaancha- token.
+- Fresh preparer+mcp tokens regenerated (new prefix); .env + .mcp.json updated to CYBERAANCHA_*. Collector token in meta still carries old prefix (cosmetic, still valid).
+- **Connected MCP session must reconnect**: server key is now "cyberaancha", env var CYBERAANCHA_MCP_TOKEN, token rotated.
+
 ## 2026-07-19 — captions move to the Mac (yt-dlp); collector parallelism
 
 - **Root cause of "captions: none":** YouTube walls browser caption fetching behind poToken (2024+). Verified in-browser: `/youtubei/v1/player` returns UNPLAYABLE + no tracks even with the session; the watch-page `ytInitialPlayerResponse` HAS `["ru(auto)"]` but its timedtext baseUrl returns HTTP 200 **empty** without poToken; `get_transcript` 400s. **yt-dlp gets the auto-captions cleanly** (handles poToken/signatures).
