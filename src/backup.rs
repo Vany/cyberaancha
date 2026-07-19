@@ -16,7 +16,7 @@ use rusqlite::Connection;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
-const PREFIX: &str = "aancha-";
+const PREFIX: &str = "cyberaancha-";
 const SUFFIX: &str = ".tar.gz";
 
 /// Snapshot + tar + prune. Also records last_backup_{at,status,file} in meta.
@@ -35,7 +35,7 @@ pub fn create(conn: &Connection, cfg: &Config, config_path: &Path) -> Result<Pat
         builder.append_path_with_name(&snapshot, db::DB_FILE)?;
         if config_path.exists() {
             // Reference copy only; restore never overwrites the live config.
-            builder.append_path_with_name(config_path, "aancha.toml.reference")?;
+            builder.append_path_with_name(config_path, "cyberaancha.toml.reference")?;
         }
         builder.into_inner()?.finish()?;
         Ok(())

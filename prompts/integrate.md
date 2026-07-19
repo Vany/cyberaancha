@@ -6,7 +6,7 @@ This runs at build time on the Mac; the production server has no LLM, so the
 quality of what you write here IS the quality of every future bot answer.
 
 Prompt version: **v1** (record this as `prompt_version` if asked). Server base URL
-and preparer token come from the session env (`$AANCHA_SERVER`, `$AANCHA_PREP_TOKEN`).
+and preparer token come from the session env (`$CYBERAANCHA_SERVER`, `$CYBERAANCHA_PREP_TOKEN`).
 
 ## Iron rules
 
@@ -19,7 +19,7 @@ and preparer token come from the session env (`$AANCHA_SERVER`, `$AANCHA_PREP_TO
 
 ## Step 1 — claim the task
 
-`GET $AANCHA_SERVER/api/prep/claim` with `Authorization: Bearer $AANCHA_PREP_TOKEN`.
+`GET $CYBERAANCHA_SERVER/api/prep/claim` with `Authorization: Bearer $CYBERAANCHA_PREP_TOKEN`.
 Response `{ task: { id, subject, bundle } }` or `{ task: null }` (nothing to do → stop).
 
 The `bundle` contains:

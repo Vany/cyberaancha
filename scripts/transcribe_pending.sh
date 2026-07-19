@@ -5,19 +5,19 @@
 # after each job.
 #
 # Env (see PREP.md):
-#   AANCHA_SERVER       e.g. https://youtube.serezhkin.com
-#   AANCHA_PREP_TOKEN   from `aancha-server gen-token preparer`
+#   CYBERAANCHA_SERVER       e.g. https://youtube.serezhkin.com
+#   CYBERAANCHA_PREP_TOKEN   from `cyberaancha-server gen-token preparer`
 #   WHISPER_BIN         default: whisper-cli (whisper.cpp)
 #   WHISPER_MODEL       default: ~/models/ggml-large-v3-turbo-q5_0.bin
 #   WHISPER_LANG        default: ru
 set -euo pipefail
 
-: "${AANCHA_SERVER:?set AANCHA_SERVER}"
-: "${AANCHA_PREP_TOKEN:?set AANCHA_PREP_TOKEN}"
+: "${CYBERAANCHA_SERVER:?set CYBERAANCHA_SERVER}"
+: "${CYBERAANCHA_PREP_TOKEN:?set CYBERAANCHA_PREP_TOKEN}"
 WHISPER_BIN="${WHISPER_BIN:-whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:-$HOME/models/ggml-large-v3-turbo-q5_0.bin}"
 WHISPER_LANG="${WHISPER_LANG:-ru}"
-AUTH="Authorization: Bearer ${AANCHA_PREP_TOKEN}"
+AUTH="Authorization: Bearer ${CYBERAANCHA_PREP_TOKEN}"
 MODEL_NAME="$(basename "$WHISPER_MODEL")"
 
 for tool in yt-dlp ffmpeg jq curl "$WHISPER_BIN"; do
@@ -30,7 +30,7 @@ trap 'rm -rf "$work"' EXIT
 
 process_one() {
   local claim id yt_id url wav out_json result_json force_whisper
-  claim="$(curl -fsS -H "$AUTH" "$AANCHA_SERVER/api/transcribe/claim")" || return 1
+  claim="$(curl -fsS -H "$AUTH" "$CYBERAANCHA_SERVER/api/transcribe/claim")" || return 1
   [ "$(jq -r '.task' <<<"$claim")" = "null" ] && return 2   # nothing to do
   id="$(jq -r '.task.id' <<<"$claim")"
   yt_id="$(jq -r '.task.yt_id' <<<"$claim")"
@@ -46,7 +46,7 @@ process_one() {
     echo "  FAILED: $1" >&2
     curl -fsS -H "$AUTH" -H 'content-type: application/json' \
       -d "$(jq -nc --arg e "$1" '{error:$e}')" \
-      "$AANCHA_SERVER/api/transcribe/${id}/fail" >/dev/null || true
+      "$CYBERAANCHA_SERVER/api/transcribe/${id}/fail" >/dev/null || true
     return 1
   }
 
@@ -106,7 +106,7 @@ submit_result() {
   n="$(jq '.segments | length' "$file")"
   if ! curl -fsS -H "$AUTH" -H 'content-type: application/json' \
        --data-binary @"$file" \
-       "$AANCHA_SERVER/api/transcribe/${id}/result" >/dev/null; then
+       "$CYBERAANCHA_SERVER/api/transcribe/${id}/result" >/dev/null; then
     fail "submit result"; return 0
   fi
   echo "  done via ${label}: ${n} segments"

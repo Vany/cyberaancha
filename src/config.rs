@@ -47,7 +47,7 @@ pub struct Owner {
 impl Default for Owner {
     fn default() -> Self {
         // Generic defaults — the code is not hardcoded to any one person. The
-        // production instance overrides these in `[owner]` (see aancha.toml.example).
+        // production instance overrides these in `[owner]` (see cyberaancha.toml.example).
         Self {
             name: String::new(),
             reference: "автора".into(),

@@ -18,7 +18,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("006_task_payload", include_str!("migrations/006_task_payload.sql")),
 ];
 
-pub const DB_FILE: &str = "aancha.db";
+pub const DB_FILE: &str = "cyberaancha.db";
 
 #[derive(Clone)]
 pub struct Db(Arc<Mutex<Connection>>);

@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- aancha admin panel (P5): Browse / Questions / Test / Sources / System.
+<!-- cyberaancha admin panel (P5): Browse / Questions / Test / Sources / System.
      Single self-contained file — inline CSS + vanilla JS, no build, no CDN,
      no framework. Embedded via include_str! and served at GET /admin.
      It talks only to this server's REST API (iron rule: no LLM, no external
@@ -12,7 +12,7 @@
 <!-- Empty inline icon: stops the browser requesting /favicon.ico (which the
      server 404s), keeping the console clean and adding no external asset. -->
 <link rel="icon" href="data:,">
-<title>aancha — admin</title>
+<title>cyberaancha — admin</title>
 <style>
   :root {
     --fg: #1b1d20; --muted: #6b7178; --line: #e2e5e9; --bg: #f6f7f9;
@@ -129,7 +129,7 @@
 </head>
 <body>
 <header>
-  <span class="brand">aancha</span>
+  <span class="brand">cyberaancha</span>
   <span id="meta" class="meta"></span>
 </header>
 <nav id="nav"></nav>
@@ -250,7 +250,7 @@ function renderHeader() {
   clear(m);
   if (!STATE) return;
   // Brand + title come from config (derived from the channel/owner), not hardcoded.
-  const brand = STATE.brand || "aancha";
+  const brand = STATE.brand || "cyberaancha";
   const brandEl = document.querySelector(".brand");
   if (brandEl) brandEl.textContent = brand;
   document.title = brand + " — admin";
@@ -709,7 +709,7 @@ function fillQueue(node, queue) {
 // this page; it is embedded into a draggable bookmarklet and a copyable console
 // snippet, each = config {server, token, pace_ms} + the /collector.js source.
 function buildCollectorCard() {
-  const brand = (STATE && STATE.brand) || "aancha";
+  const brand = (STATE && STATE.brand) || "cyberaancha";
   const bm = h("a", { class: "bm", href: "#" }, "⛏ " + brand + " collect");
   const snippet = h("pre", { class: "snippet" }, "…");
   const copy = h("button", { class: "ghost" }, "Копировать сниппет");
@@ -724,11 +724,11 @@ function buildCollectorCard() {
     try { src = await api("/collector.js"); }
     catch (e) { note.textContent = "не удалось загрузить collector.js: " + e.message; return; }
     // Snippet: config + full source — the console is exempt from CSP/Trusted Types.
-    snippet.textContent = `window.AANCHA_CFG=${cfgJson};\n${src}`;
+    snippet.textContent = `window.CYBERAANCHA_CFG=${cfgJson};\n${src}`;
     // Bookmarklet: fetch source and eval via a Trusted-Types policy (CSP path).
     const code = `(()=>{const c=${cfgJson};` +
-      `const p=window.trustedTypes?trustedTypes.createPolicy('aancha'+Math.floor(Math.random()*1e6),{createScript:s=>s}):null;` +
-      `fetch(c.server+'/collector.js').then(r=>r.text()).then(s=>{const code='window.AANCHA_CFG='+JSON.stringify(c)+';'+s;` +
+      `const p=window.trustedTypes?trustedTypes.createPolicy('cyberaancha'+Math.floor(Math.random()*1e6),{createScript:s=>s}):null;` +
+      `fetch(c.server+'/collector.js').then(r=>r.text()).then(s=>{const code='window.CYBERAANCHA_CFG='+JSON.stringify(c)+';'+s;` +
       `(0,eval)(p?p.createScript(code):code)})})()`;
     bm.href = "javascript:" + encodeURIComponent(code);
   }

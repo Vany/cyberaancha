@@ -16,7 +16,7 @@ The base is **scientific reference material** — much of it is information for 
 
 | Part | Where | Role |
 |---|---|---|
-| **Server** `aancha-server` | n1.serezhkin.com, Docker, `~vany/aancha` | Canonical storage (raw + processed), task queue, validation, tantivy index, REST + MCP + SPA, backups. **Never talks to YouTube, never calls an LLM.** |
+| **Server** `cyberaancha-server` | n1.serezhkin.com, Docker, `~vany/cyberaancha` | Canonical storage (raw + processed), task queue, validation, tantivy index, REST + MCP + SPA, backups. **Never talks to YouTube, never calls an LLM.** |
 | **Collector** | browser JS, runs in youtube.com page context | Harvests metadata, captions, comments, chat replays using the browser session; posts JSON to server. Bookmarklet first; console snippet fallback. |
 | **Preparer** | Claude Code on Vany's Mac + `prompts/` + `scripts/` | Claims tasks over REST/MCP; transcribes locally (yt-dlp audio + whisper.cpp); extracts/integrates knowledge with agent reasoning guided by versioned prompts. **Not a binary.** |
 | Ancha (owner role) | panel + MCP | Browses, edits, answers questions. Later: runs collector for owner-only data. No OAuth from her, ever. |
@@ -39,7 +39,7 @@ The base is **scientific reference material** — much of it is information for 
 
 ```
                  ┌──────────────────────────────────────────┐
-                 │ aancha-server @ n1 (127.0.0.1:8087)      │
+                 │ cyberaancha-server @ n1 (127.0.0.1:8087)      │
                  │  SQLite (canonical: raw+processed+queue) │
                  │  tantivy (articles idx, transcripts idx) │
                  │  REST ─ MCP (same handlers) ─ SPA        │
@@ -161,7 +161,7 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - Interactive for development; **headless** (`claude -p "process next N tasks"`) for routine cycles; queue is worker-agnostic — a Batch-API worker can be added later if bulk demands, without server changes.
 - Anthropic usage via subscription sessions; no API-orchestration code.
 
-## 13. Config (TOML, `~vany/aancha/aancha.toml`)
+## 13. Config (TOML, `~vany/cyberaancha/cyberaancha.toml`)
 
 ```toml
 [channel]  handle = "@vanyserezhkin"          # test; prod: @AnchaBaranovaProf
@@ -183,9 +183,9 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 
 - n1.serezhkin.com: Ubuntu 25.04 x86_64, 1 vCPU, 457 MB RAM, 8.6 GB disk (1.7 GB free), Docker 29.2.1 + Compose v5, nginx 1.26.3 (pattern vhost: music.serezhkin.com), certbot 2.11, syncthing running, per-project dirs in `~vany`.
 - **Build**: on the Mac — `cargo-zigbuild` → static `x86_64-unknown-linux-musl` binary, SPA embedded; `FROM scratch` image (~15 MB) assembled server-side from scp'd binary (no registry, no server compiles).
-- `~vany/aancha/`: `docker-compose.yml`, `aancha.toml`, `data/` (SQLite WAL, zstd raw blobs), `index/` (tantivy, rebuildable), `backups/`.
+- `~vany/cyberaancha/`: `docker-compose.yml`, `cyberaancha.toml`, `data/` (SQLite WAL, zstd raw blobs), `index/` (tantivy, rebuildable), `backups/`.
 - Container: `mem_limit` (e.g. 256 MB), restart unless-stopped, binds 127.0.0.1 only.
-- **Backups**: internal scheduler (no cron), daily `backups/aancha-YYYY-MM-DD.tar.gz` = SQLite snapshot + config (index excluded), keep 3 pruned; Vany archives off-box. **Immediate backup on demand**: `aancha-server backup` CLI subcommand + System-tab button (`POST /api/backups`) — same tarball format, timestamped, e.g. before risky operations. Restore: `aancha-server restore --latest --yes` (destructive: stop, wipe data, untar, reindex).
+- **Backups**: internal scheduler (no cron), daily `backups/cyberaancha-YYYY-MM-DD.tar.gz` = SQLite snapshot + config (index excluded), keep 3 pruned; Vany archives off-box. **Immediate backup on demand**: `cyberaancha-server backup` CLI subcommand + System-tab button (`POST /api/backups`) — same tarball format, timestamped, e.g. before risky operations. Restore: `cyberaancha-server restore --latest --yes` (destructive: stop, wipe data, untar, reindex).
 - Logs: tracing JSON → stdout → `docker logs`.
 
 ## 16. Costs & volumes (P0 facts, 2026-07-19)
@@ -238,14 +238,14 @@ Tabs: **Search/Browse** (wiki, cross-links, article view: paragraph/story/timeli
 - 2026-07-19 — Two panel roles: owner (Ancha), admin (Vany). — *(V)*
 - 2026-07-19 — Channel in config; test on @vanyserezhkin; ≤5 links per article answer. — *(V)*
 - 2026-07-19 — Backups: service-internal daily dated tarball (no cron), keep-N, off-box archiving manual; `restore --latest` drop-and-restore command. — *(V+C)*
-- 2026-07-19 — Deploy: n1.serezhkin.com `~vany/aancha`, existing nginx + Let's Encrypt, app on 127.0.0.1:8087, scratch image from Mac-built static musl binary. — *(V+C)*
+- 2026-07-19 — Deploy: n1.serezhkin.com `~vany/cyberaancha`, existing nginx + Let's Encrypt, app on 127.0.0.1:8087, scratch image from Mac-built static musl binary. — *(V+C)*
 - 2026-07-19 — Anthropic: no API-orchestration code; prompts as artifacts executed by Claude sessions. — *(V)*
-- 2026-07-19 — Immediate backup: `aancha-server backup` CLI + System-tab button, same tarball as daily. — *(V)*
+- 2026-07-19 — Immediate backup: `cyberaancha-server backup` CLI + System-tab button, same tarball as daily. — *(V)*
 - 2026-07-19 — Mac-side split: mechanical tasks (transcribe) = unattended shell scripts; judgment tasks (extract/integrate) = Claude sessions. — *(V+C)*
 - 2026-07-19 — Harvest is **time-windowed** (default 7 days per wave), not video-counted; two watermarks (oldest/newest). — *(V+C)*
 - 2026-07-19 — Secrets in DB (auth table), config secret-free; argon2 stable 0.5 (0.6 still RC). — *(C)*
 - 2026-07-19 — Code hosted at github.com/Vany/cyberaancha, private-first. — *(V+C)* **Superseded same day: repo is public** (V's call); history audited clean before the flip; secrets hygiene codified in PROG.md. — *(V)*
 - 2026-07-19 — **C9: non-technical owner.** All unusual operations (esp. the collector) must be explained inline / in tooltips, plain Russian, no unexplained jargon. New requirement → panel gets an owner-help pass. — *(V)*
-- 2026-07-19 — **User-facing identity is config-driven, not hardcoded to one person** (V: "there is a lot of 'aancha' everywhere"). New `[owner]` config: `name` (English/MCP), `ref` (genitive for "Мнение <ref>:"), `disclaimer` (full attribution line), `brand` (panel title; default = handle sans @). Threaded into panel header/title (`/api/state`), the answer template, and MCP instructions. Defaults are **generic** (brand from handle, "автора", plain disclaimer) — production sets the professor's values. Internal identifiers (binary `aancha-server`, token prefixes, `AANCHA_CFG`, deploy dir, env vars, collector bookmarklet name) stay "aancha" — plumbing, changing them breaks deploy/tokens/collector for no user benefit. — *(V+C)*
+- 2026-07-19 — **User-facing identity is config-driven, not hardcoded to one person** (V: "there is a lot of 'cyberaancha' everywhere"). New `[owner]` config: `name` (English/MCP), `ref` (genitive for "Мнение <ref>:"), `disclaimer` (full attribution line), `brand` (panel title; default = handle sans @). Threaded into panel header/title (`/api/state`), the answer template, and MCP instructions. Defaults are **generic** (brand from handle, "автора", plain disclaimer) — production sets the professor's values. Internal identifiers (binary `cyberaancha-server`, token prefixes, `CYBERAANCHA_CFG`, deploy dir, env vars, collector bookmarklet name) stay "cyberaancha" — plumbing, changing them breaks deploy/tokens/collector for no user benefit. — *(V+C)*
 - 2026-07-19 — **Collector token auto-minted, not hidden, not derived from public info.** Trusted users needn't handle it as a secret (V), so the admin panel auto-fetches it (`GET /api/collector/token`, admin-only, mint-once-then-stable, stored retrievable in `meta`) and auto-fills the launcher — zero copy-paste, shown in plain text. But it stays a *random* value (NOT derived from the channel name): the repo is public, so a public-info-derived key would let anyone POST fake "professor said X" data into the KB. Random + auto-filled = same one-click UX, write-endpoint still protected. — *(V proposed channel-derivation; C argued random-auto-fill, same UX, safe under a public repo; V's intent honored)*
 - 2026-07-19 — Hostnames: **test = youtube.serezhkin.com** (Vany's channel), prod = aancha.serezhkin.com (her channel). Both CNAME → n1.serezhkin.com. Per-host certbot (HTTP-01), not wildcard (wildcard needs DNS-01 + API plugin → no clean auto-renew). — *(V+C)*

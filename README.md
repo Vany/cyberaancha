@@ -11,7 +11,7 @@ Distills the public knowledge of **Prof. Ancha Baranova**'s YouTube channel — 
 One deliberately *dumb-but-strict* hub and smart edges:
 
 ```
-collector (browser JS,      ──►  aancha-server (Rust @ small VPS)   ◄── preparer (Claude on a Mac:
+collector (browser JS,      ──►  cyberaancha-server (Rust @ small VPS)   ◄── preparer (Claude on a Mac:
 page-context fetch,              SQLite + tantivy + task queue           whisper.cpp, extraction,
 session-side harvesting)         REST + MCP + SPA + backups             integration via prompts/)
 ```

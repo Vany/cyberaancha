@@ -185,7 +185,7 @@ fn cache_put(cache: &BasicCache, key: String, role: Role) {
 fn challenge() -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, r#"Basic realm="aancha""#)],
+        [(header::WWW_AUTHENTICATE, r#"Basic realm="cyberaancha""#)],
         "authentication required",
     )
         .into_response()

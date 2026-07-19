@@ -129,7 +129,7 @@ Header shows channel + version + role from `/api/state`.
      never sent anywhere but embedded into the bookmarklet/snippet). On input, build:
      (a) a draggable bookmarklet link, and (b) a copyable console snippet, both = config
      `{server: location.origin, token, pace_ms:1500}` + the text of `/collector.js`.
-     Snippet = `window.AANCHA_CFG={…};\n<collector source>`. Bookmarklet = a `javascript:` URL
+     Snippet = `window.CYBERAANCHA_CFG={…};\n<collector source>`. Bookmarklet = a `javascript:` URL
      that fetches `/collector.js` and evals it under a Trusted-Types policy (see the existing
      minimal admin.html for the exact working pattern — reuse it).
    - MCP: a placeholder card "MCP endpoint" showing `${location.origin}/mcp` and a note that the
@@ -148,7 +148,7 @@ Header shows channel + version + role from `/api/state`.
 
 Build & run the server locally, seed data, drive the API:
 ```
-cargo run -- serve --config aancha.toml   # (create aancha.toml from the example; data/ is scratch)
+cargo run -- serve --config cyberaancha.toml   # (create cyberaancha.toml from the example; data/ is scratch)
 # provision creds:
 printf 'testpass1' | cargo run -- set-password admin
 # seed an article via the API and confirm the panel shows it:

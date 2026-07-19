@@ -1,24 +1,24 @@
-// aancha collector — runs in youtube.com page context (SPEC §11).
+// cyberaancha collector — runs in youtube.com page context (SPEC §11).
 // Pure fetch, zero DOM script injection: works under YouTube's CSP/Trusted Types.
 // Reads live ytcfg (never hardcodes client versions), paces every YouTube
-// request, posts JSON to the aancha server. Config comes from window.AANCHA_CFG
+// request, posts JSON to the cyberaancha server. Config comes from window.CYBERAANCHA_CFG
 // = { server, token, pace_ms } set by the snippet/bookmarklet before this file.
 (() => {
   "use strict";
-  const cfg = window.AANCHA_CFG;
+  const cfg = window.CYBERAANCHA_CFG;
   if (!cfg || !cfg.server || !cfg.token) {
-    alert("aancha: window.AANCHA_CFG {server, token} required");
+    alert("cyberaancha: window.CYBERAANCHA_CFG {server, token} required");
     return;
   }
   if (!location.hostname.endsWith("youtube.com")) {
-    alert("aancha: run this on a youtube.com page");
+    alert("cyberaancha: run this on a youtube.com page");
     return;
   }
-  // Displayed brand (from the panel's config; internal globals stay AANCHA_*).
-  const brand = cfg.brand || "aancha";
-  if (window.AANCHA_RUNNING) { console.warn(brand + ": already running"); return; }
-  window.AANCHA_RUNNING = true;
-  window.AANCHA_STOP = false;
+  // Displayed brand (from the panel's config; internal globals stay CYBERAANCHA_*).
+  const brand = cfg.brand || "cyberaancha";
+  if (window.CYBERAANCHA_RUNNING) { console.warn(brand + ": already running"); return; }
+  window.CYBERAANCHA_RUNNING = true;
+  window.CYBERAANCHA_STOP = false;
 
   // ---- tiny UI --------------------------------------------------------------
   const box = document.createElement("div");
@@ -30,12 +30,12 @@
   const stopBtn = document.createElement("button");
   stopBtn.textContent = "stop";
   stopBtn.style.cssText = "margin-left:10px;background:#611;color:#fff;border:0;border-radius:4px;padding:1px 8px;cursor:pointer";
-  stopBtn.onclick = () => { window.AANCHA_STOP = true; say("stopping after current task…"); };
+  stopBtn.onclick = () => { window.CYBERAANCHA_STOP = true; say("stopping after current task…"); };
   document.body.append(box);
   box.append(stopBtn);
   const say = (msg) => { box.childNodes[0].textContent = brand + ": " + msg; };
 
-  // Verbose console logging (on by default; set AANCHA_CFG.debug=false to quiet).
+  // Verbose console logging (on by default; set CYBERAANCHA_CFG.debug=false to quiet).
   // Filter the console by the brand to follow along.
   const DEBUG = cfg.debug !== false;
   const dbg = (...a) => { if (DEBUG) console.log("%c" + brand, "color:#3ba;font-weight:bold", ...a); };
@@ -181,7 +181,7 @@
       // Walk continuations until the tab is exhausted (whole listing is cheap).
       // A failed continuation must NOT discard the videos already found — keep
       // what we have and move on (page 1 alone is a usable result).
-      while (tokens.length && !window.AANCHA_STOP) {
+      while (tokens.length && !window.CYBERAANCHA_STOP) {
         say(`discover: /${tab} … ${seen.size} items`);
         let page;
         try { page = await innertube("browse", { continuation: tokens[0] }); }
@@ -269,7 +269,7 @@
 
     const comments = [], seen = new Set(), replyThreads = [];
     let guard = 0;
-    while (token && !window.AANCHA_STOP && guard++ < 100000) {
+    while (token && !window.CYBERAANCHA_STOP && guard++ < 100000) {
       let page;
       try { page = await innertube("next", { continuation: token }); }
       catch (e) { dwarn("comments continuation stopped", e); break; }
@@ -285,7 +285,7 @@
     }
     // Expand reply threads: the professor's answers live in replies (SPEC §6).
     for (const [rt, parentId] of replyThreads) {
-      if (window.AANCHA_STOP) break;
+      if (window.CYBERAANCHA_STOP) break;
       let t = rt, g2 = 0;
       while (t && g2++ < 1000) {
         let page;
@@ -310,7 +310,7 @@
 
     const messages = [], seen = new Set();
     let guard = 0;
-    while (cont && !window.AANCHA_STOP && guard++ < 200000) {
+    while (cont && !window.CYBERAANCHA_STOP && guard++ < 200000) {
       let page;
       try { page = await innertube("live_chat/get_live_chat_replay", { continuation: cont }); }
       catch (e) { dwarn("chat continuation stopped", e); break; }
@@ -347,7 +347,7 @@
 
   // ---- main loop: a small pool of concurrent workers -----------------------
   // N tasks run at once (each still paces its own YouTube requests, so the net
-  // rate is N/pace — keep N modest to stay polite). Tune via AANCHA_CFG.concurrency.
+  // rate is N/pace — keep N modest to stay polite). Tune via CYBERAANCHA_CFG.concurrency.
   const CONCURRENCY = Math.max(1, Math.min(cfg.concurrency || 4, 8));
   (async () => {
     let done = 0, failed = 0;
@@ -369,13 +369,13 @@
     };
     try {
       for (;;) {
-        if (window.AANCHA_STOP) break;
+        if (window.CYBERAANCHA_STOP) break;
         // Claim a batch; lease covers all of them while the pool drains it.
         const { tasks } = await api(`/api/tasks?limit=${CONCURRENCY * 3}`);
         if (!tasks.length) break;
         const queue = tasks.slice();
         const worker = async () => {
-          while (queue.length && !window.AANCHA_STOP) await runOne(queue.shift());
+          while (queue.length && !window.CYBERAANCHA_STOP) await runOne(queue.shift());
         };
         await Promise.all(Array.from({ length: CONCURRENCY }, worker));
       }
@@ -384,7 +384,7 @@
       dwarn("collector stopped", e);
       say(`ERROR: ${String(e).slice(0, 300)}`);
     } finally {
-      window.AANCHA_RUNNING = false;
+      window.CYBERAANCHA_RUNNING = false;
       stopBtn.textContent = "close";
       stopBtn.onclick = () => box.remove();
     }

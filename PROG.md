@@ -58,7 +58,7 @@ deploy/              Dockerfile (scratch), docker-compose.yml, nginx vhost sampl
 - **Times**: UTC everywhere, ISO-8601 strings in SQLite, jiff types in code.
 - **Validation at the boundary**: every task submission → JSON Schema check + referential integrity + size caps. Reject, don't repair. Record prompt version on preparer submissions.
 - **Secrets in DB** (`auth` table: argon2 PHC strings, blake3 token hashes), never in config or git. Constant-time compares.
-- **Secrets vs public repo** (repo is public): no credential, token, hostname-embedded token, or backup tarball ever enters git — real config (`aancha.toml`), `data/`, `backups/`, `.env*` are gitignored; docs and examples use `CHOSEN_…` placeholders only; edge-side tokens (collector/preparer/mcp) live in gitignored `.env` on the machine that uses them. When in doubt, it doesn't get committed.
+- **Secrets vs public repo** (repo is public): no credential, token, hostname-embedded token, or backup tarball ever enters git — real config (`cyberaancha.toml`), `data/`, `backups/`, `.env*` are gitignored; docs and examples use `CHOSEN_…` placeholders only; edge-side tokens (collector/preparer/mcp) live in gitignored `.env` on the machine that uses them. When in doubt, it doesn't get committed.
 - **Comments explain why**; each module small, single-purpose, observable.
 - **Tests**: unit-test queue engine, validation, answer engine, slug/alias logic; no mocked-HTTP theater. `cargo test` must stay fast.
 - **Frontend**: no build step ever. ES modules, vendored pinned preact+htm, one file per tab, fetch wrapper handling auth/errors. Works from `file://`? No — same-origin only, keep it simple.

@@ -8,8 +8,8 @@ fetches (yt-dlp), transcribes (whisper.cpp), and reasons (Claude). See `../SPEC.
 ## Setup (once)
 
 ```sh
-export AANCHA_SERVER=https://youtube.serezhkin.com      # test; prod: https://aancha.serezhkin.com
-export AANCHA_PREP_TOKEN=<from: aancha-server gen-token preparer>
+export CYBERAANCHA_SERVER=https://youtube.serezhkin.com      # test; prod: https://aancha.serezhkin.com
+export CYBERAANCHA_PREP_TOKEN=<from: cyberaancha-server gen-token preparer>
 # tools: yt-dlp (brew), whisper.cpp + a model (see scripts/transcribe_pending.sh), jq, curl
 ```
 

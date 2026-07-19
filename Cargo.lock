@@ -3,37 +3,6 @@
 version = 4
 
 [[package]]
-name = "aancha-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argon2",
- "axum",
- "base64",
- "blake3",
- "clap",
- "flate2",
- "jiff",
- "jsonschema",
- "rand",
- "rmcp",
- "rpassword",
- "rusqlite",
- "schemars",
- "serde",
- "serde_json",
- "tantivy",
- "tar",
- "tempfile",
- "tokio",
- "toml",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "zstd",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -556,6 +525,37 @@ checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
 dependencies = [
  "generic-array",
  "typenum",
+]
+
+[[package]]
+name = "cyberaancha-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "axum",
+ "base64",
+ "blake3",
+ "clap",
+ "flate2",
+ "jiff",
+ "jsonschema",
+ "rand",
+ "rmcp",
+ "rpassword",
+ "rusqlite",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tantivy",
+ "tar",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "zstd",
 ]
 
 [[package]]

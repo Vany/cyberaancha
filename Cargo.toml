@@ -1,5 +1,5 @@
 [package]
-name = "aancha-server"
+name = "cyberaancha-server"
 version = "0.1.0"
 edition = "2024"
 description = "Knowledge base server for Prof. Ancha Baranova's channel — storage, task queue, fulltext, panel, MCP"

@@ -1,4 +1,4 @@
-//! aancha-server — CLI dispatch only (PROG.md layout). Everything real lives in modules.
+//! cyberaancha-server — CLI dispatch only (PROG.md layout). Everything real lives in modules.
 
 mod answer;
 mod auth;
@@ -19,10 +19,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "aancha-server", version, about = "Knowledge base server for cyberaancha")]
+#[command(name = "cyberaancha-server", version, about = "Knowledge base server for cyberaancha")]
 struct Cli {
     /// Path to secret-free TOML config
-    #[arg(long, default_value = "aancha.toml", global = true)]
+    #[arg(long, default_value = "cyberaancha.toml", global = true)]
     config: PathBuf,
     #[command(subcommand)]
     cmd: Cmd,
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,aancha_server=debug".into()),
+                .unwrap_or_else(|_| "info,cyberaancha_server=debug".into()),
         )
         .init();
 
@@ -98,7 +98,7 @@ fn open_db(cfg: &config::Config) -> Result<db::Db> {
 }
 
 /// Interactive: prompt without echo, confirm twice. Piped: read one line —
-/// enables provisioning like `echo pw | aancha-server set-password owner`.
+/// enables provisioning like `echo pw | cyberaancha-server set-password owner`.
 fn read_secret(prompt: &str) -> Result<String> {
     if std::io::stdin().is_terminal() {
         let first = rpassword::prompt_password(prompt)?;
@@ -143,7 +143,7 @@ async fn serve(cfg: config::Config, config_path: PathBuf) -> Result<()> {
     let app = http::router(state);
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.bind).await?;
-    tracing::info!(bind = %cfg.server.bind, channel = %cfg.channel.handle, "aancha-server up");
+    tracing::info!(bind = %cfg.server.bind, channel = %cfg.channel.handle, "cyberaancha-server up");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

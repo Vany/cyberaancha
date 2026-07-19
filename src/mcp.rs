@@ -21,7 +21,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, tool, tool_handler,
 /// The preparer playbook, exposed as the `integrate` MCP prompt so a connected
 /// Claude can run the whole loop. Kept in sync with prompts/integrate.md but
 /// phrased for the MCP tools (next_unprocessed_video / submit_articles).
-const INTEGRATE_PROMPT: &str = r#"You are the preparer for the aancha knowledge base — you turn ONE harvested video into curated KB articles. This runs at build time; the production server has no LLM, so the quality of what you write here IS the quality of every future answer.
+const INTEGRATE_PROMPT: &str = r#"You are the preparer for the cyberaancha knowledge base — you turn ONE harvested video into curated KB articles. This runs at build time; the production server has no LLM, so the quality of what you write here IS the quality of every future answer.
 
 Iron rules:
 - Quote and attribute; You record what the author said, with sources. When unsure, raise a question instead of guessing.
@@ -42,7 +42,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct AanchaMcp {
+pub struct CyberaanchaMcp {
     db: Db,
     index: Arc<SearchIndex>,
     owner_name: String,
@@ -88,7 +88,7 @@ fn oops(e: anyhow::Error) -> McpError {
 }
 
 #[tool_router]
-impl AanchaMcp {
+impl CyberaanchaMcp {
     pub fn new(db: Db, index: Arc<SearchIndex>, owner_name: String) -> Self {
         Self {
             db,
@@ -288,7 +288,7 @@ impl AanchaMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for AanchaMcp {
+impl ServerHandler for CyberaanchaMcp {
     fn get_info(&self) -> ServerInfo {
         // ServerInfo is #[non_exhaustive] — build from default, then set fields.
         let mut info = ServerInfo::default();
@@ -298,7 +298,7 @@ impl ServerHandler for AanchaMcp {
             .enable_prompts()
             .build();
         info.server_info = Implementation::from_build_env();
-        info.server_info.name = "aancha".into();
+        info.server_info.name = "cyberaancha".into();
         info.server_info.version = env!("CARGO_PKG_VERSION").into();
         info.instructions = Some(format!(
             "Curated knowledge base of {}'s public statements (YouTube). Search \
@@ -354,7 +354,7 @@ pub fn service(
     index: Arc<SearchIndex>,
     public_host: Option<String>,
     owner_name: String,
-) -> StreamableHttpService<AanchaMcp, LocalSessionManager> {
+) -> StreamableHttpService<CyberaanchaMcp, LocalSessionManager> {
     let mut allowed_hosts: Vec<String> = vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
     if let Some(host) = public_host {
         allowed_hosts.push(host);
@@ -363,7 +363,7 @@ pub fn service(
     let config = StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts);
     StreamableHttpService::new(
         move || {
-            Ok(AanchaMcp::new(
+            Ok(CyberaanchaMcp::new(
                 db.clone(),
                 index.clone(),
                 owner_name.clone(),

@@ -1,5 +1,5 @@
-# Copy to aancha.toml (gitignored). No secrets here — secrets live in the DB
-# via `aancha-server set-password` / `gen-token` (SPEC §13).
+# Copy to cyberaancha.toml (gitignored). No secrets here — secrets live in the DB
+# via `cyberaancha-server set-password` / `gen-token` (SPEC §13).
 
 [channel]
 handle = "@vanyserezhkin" # production: "@AnchaBaranovaProf"
@@ -11,7 +11,7 @@ handle = "@vanyserezhkin" # production: "@AnchaBaranovaProf"
 name = "Ancha Baranova"                                                              # English / MCP
 ref = "профессора"                                                                   # "Мнение <ref>:" (genitive)
 disclaimer = "Справочный материал по выступлениям проф. Барановой, не медицинская рекомендация."
-brand = "aancha"                                                                     # panel title; omit → derived from handle
+brand = "cyberaancha"                                                                     # panel title; omit → derived from handle
 
 [server]
 bind = "127.0.0.1:8087"

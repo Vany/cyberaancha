@@ -6,8 +6,8 @@ Newest first. One entry per finished task.
 
 - **Root cause of "captions: none":** YouTube walls browser caption fetching behind poToken (2024+). Verified in-browser: `/youtubei/v1/player` returns UNPLAYABLE + no tracks even with the session; the watch-page `ytInitialPlayerResponse` HAS `["ru(auto)"]` but its timedtext baseUrl returns HTTP 200 **empty** without poToken; `get_transcript` 400s. **yt-dlp gets the auto-captions cleanly** (handles poToken/signatures).
 - **Architecture change:** captions leave the browser. Collector now does discover/meta/comments/chat only. discover schedules a **`transcribe`** task (Mac). `scripts/transcribe_pending.sh` = yt-dlp auto-subs (json3, ru→en) first → parse to schema (source=asr); Whisper only when no subs (source=whisper). integrate readiness now requires `transcribe_state='done'`. Harvest wave completes on collector work (maybe_finish_wave counts only collector types); transcribe/integrate run after. `harvest_captions` removed from collector_types (schema/apply left dead-but-harmless).
-- **Collector parallelism** (V asked): main loop is now a pool of N=4 concurrent workers (AANCHA_CFG.concurrency, cap 8); each still paces its own requests so net rate ≈ N/pace.
-- Collector/panel now brand-aware (console/box/button use AANCHA_CFG.brand). 12 tests updated for the new flow, all green.
+- **Collector parallelism** (V asked): main loop is now a pool of N=4 concurrent workers (CYBERAANCHA_CFG.concurrency, cap 8); each still paces its own requests so net rate ≈ N/pace.
+- Collector/panel now brand-aware (console/box/button use CYBERAANCHA_CFG.brand). 12 tests updated for the new flow, all green.
 - Live-verified against @vanyserezhkin: harvest works (1316 discovered, meta+comments+chat OK); yt-dlp pulled 5464 real RU caption segments for a sample video.
 
 ## 2026-07-19 — finished all-but-TG; whisper ready; auth lockout
@@ -26,7 +26,7 @@ Newest first. One entry per finished task.
 ## 2026-07-19 — P5 panel + P6 MCP: MVP line reached
 
 - **P5 panel** (`web/admin.html`, built by a subagent per `web/SPEC.md`): single self-contained vanilla-JS file, XSS-safe via a text-node DOM builder. Tabs: Browse (search + article detail + owner edit/delete), Questions (answer), Test (verbatim bot answer), Sources (video inventory + status chips), System (admin-only: clocks/watermarks/queue, harvest+process buttons, backups, collector launcher, MCP slot). Subagent caught a real bug: `get_article` returned only `citations`, so owner edits would wipe facts/links → **fixed**: ArticleView now returns full stances/facts/links, panel re-sends them verbatim (lossless).
-- **P6 MCP** (`src/mcp.rs`): rmcp 2.2 streamable HTTP at `/mcp`, bearer(mcp)-gated. Tools: search_articles, get_article, list_questions, answer_question, kb_stats — return JSON strings. **Verified live**: initialize → tools/list (all 5) → tools/call search_articles finds article via alias, kb_stats returns counts. rmcp notes: `ServerInfo` is #[non_exhaustive] (build from default + set fields); `tool_router` field triggers a false dead-code warning (macro reads it — suppressed); server_info name set explicitly ("aancha"). schemars 1 added for tool param schemas.
+- **P6 MCP** (`src/mcp.rs`): rmcp 2.2 streamable HTTP at `/mcp`, bearer(mcp)-gated. Tools: search_articles, get_article, list_questions, answer_question, kb_stats — return JSON strings. **Verified live**: initialize → tools/list (all 5) → tools/call search_articles finds article via alias, kb_stats returns counts. rmcp notes: `ServerInfo` is #[non_exhaustive] (build from default + set fields); `tool_router` field triggers a false dead-code warning (macro reads it — suppressed); server_info name set explicitly ("cyberaancha"). schemars 1 added for tool param schemas.
 - Deferred: MCP resources (article://) + search_transcripts (no transcript index yet); rate-limit/governor (250ms auth brake stands).
 
 ## 2026-07-19 — P4 built: KB + tantivy + answer engine + preparer pipeline
@@ -39,7 +39,7 @@ Newest first. One entry per finished task.
 
 ## 2026-07-19 — TLS live on youtube.serezhkin.com
 
-- certbot issued the cert (per-host, HTTP-01) after the DNS negative-cache (900s SOA min) expired. Root cause of the earlier certbot failure was purely that stale NXDOMAIN, not config. HTTPS chain verified: /healthz 200, /admin 401→200. nginx vhost symlinked to ~vany/aancha/nginx-aancha.conf (deploy never clobbers it). Auto-renew armed (certbot.timer). `/` was a bare 404 → added redirect to /admin.
+- certbot issued the cert (per-host, HTTP-01) after the DNS negative-cache (900s SOA min) expired. Root cause of the earlier certbot failure was purely that stale NXDOMAIN, not config. HTTPS chain verified: /healthz 200, /admin 401→200. nginx vhost symlinked to ~vany/cyberaancha/nginx-cyberaancha.conf (deploy never clobbers it). Auto-renew armed (certbot.timer). `/` was a bare 404 → added redirect to /admin.
 
 ## 2026-07-19 — P2 built and deployed: queue + collector + panel
 
@@ -51,7 +51,7 @@ Newest first. One entry per finished task.
 
 ## 2026-07-19 — P1 built and deployed (TLS pending Vany)
 
-- Server core: db (single-conn mutex, `call`/`with`, user_version migrations), auth (argon2 0.5, blake3 tokens `aancha-<purpose>-<hex>`, rotation invalidates), basic-auth middleware (username = role; 10-min verify cache; 250 ms brake), backup (VACUUM INTO → tar.gz, prune keep-N, daily tokio loop, restore with listen-guard + pre-restore copy), /api/state + /api/backups.
+- Server core: db (single-conn mutex, `call`/`with`, user_version migrations), auth (argon2 0.5, blake3 tokens `cyberaancha-<purpose>-<hex>`, rotation invalidates), basic-auth middleware (username = role; 10-min verify cache; 250 ms brake), backup (VACUUM INTO → tar.gz, prune keep-N, daily tokio loop, restore with listen-guard + pre-restore copy), /api/state + /api/backups.
 - Deployed to n1 via zigbuild → 4.6 MB static musl → scratch image: **640 KiB RSS** idle. Gotchas hit: rusqlite 0.40 needs rustc ≥1.95 (`cfg_select` in libsqlite3-sys) → toolchain updated 1.94.1→1.97.1; argon2 0.5 default features lack OsRng → salt via `rand::random` + `SaltString::encode_b64`.
 - Compose: host networking (app's 127.0.0.1 bind is the boundary), uid 1000, mem 256 MB. Blocked on Vany: DNS A-record, then sudo nginx+certbot lines, then credentials — all in deploy/README.md.
 - Repo: github.com/Vany/cyberaancha (private), origin set.

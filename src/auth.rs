@@ -46,7 +46,7 @@ pub fn set_password(conn: &Connection, role: &str, password: &str) -> Result<()>
 
 pub fn verify_password(conn: &Connection, role: &str, password: &str) -> Result<bool> {
     let Some(phc) = stored_hash(conn, role, "password")? else {
-        tracing::warn!(role, "no password configured — run `aancha-server set-password`");
+        tracing::warn!(role, "no password configured — run `cyberaancha-server set-password`");
         return Ok(false);
     };
     let parsed =
@@ -62,7 +62,7 @@ pub fn gen_token(conn: &Connection, purpose: &str) -> Result<String> {
         bail!("unknown token purpose {purpose:?}, expected one of {TOKEN_PURPOSES:?}");
     }
     let raw: [u8; 32] = rand::random();
-    let token = format!("aancha-{purpose}-{}", hex(&raw));
+    let token = format!("cyberaancha-{purpose}-{}", hex(&raw));
     upsert(conn, purpose, "token", blake3::hash(token.as_bytes()).to_hex().as_str())?;
     Ok(token)
 }
@@ -70,7 +70,7 @@ pub fn gen_token(conn: &Connection, purpose: &str) -> Result<String> {
 #[allow(dead_code)] // consumed by the bearer middlewares from P2 (collector/preparer) and P6 (mcp)
 pub fn verify_token(conn: &Connection, purpose: &str, token: &str) -> Result<bool> {
     let Some(stored) = stored_hash(conn, purpose, "token")? else {
-        tracing::warn!(purpose, "no token configured — run `aancha-server gen-token`");
+        tracing::warn!(purpose, "no token configured — run `cyberaancha-server gen-token`");
         return Ok(false);
     };
     let stored = blake3::Hash::from_hex(&stored).context("corrupt stored token hash")?;
@@ -120,9 +120,9 @@ mod tests {
             assert!(!verify_password(c, "admin", "anything")?); // not configured
 
             let t = gen_token(c, "collector")?;
-            assert!(t.starts_with("aancha-collector-"));
+            assert!(t.starts_with("cyberaancha-collector-"));
             assert!(verify_token(c, "collector", &t)?);
-            assert!(!verify_token(c, "collector", "aancha-collector-forged")?);
+            assert!(!verify_token(c, "collector", "cyberaancha-collector-forged")?);
             assert!(!verify_token(c, "mcp", &t)?); // not configured
             let t2 = gen_token(c, "collector")?; // rotation invalidates the old one
             assert!(!verify_token(c, "collector", &t)?);
